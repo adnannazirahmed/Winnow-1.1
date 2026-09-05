@@ -22,27 +22,45 @@ The **IAM Remediation Assistant** is a full-stack security tool that:
 
 ## 🏗️ Architecture
 
+```mermaid
+flowchart TB
+    subgraph browser["Browser — frontend/ · vanilla JS + D3 + Chart.js"]
+        direction LR
+        ui["Dashboard (index.html + script.js)<br/>attack graph · findings table · charts"]
+        demo["'Load Demo Data'<br/>auto-runs on first load"]
+    end
+
+    subgraph backend["Flask backend :5000 — app.py serves the UI and the API"]
+        direction TB
+        api["POST /api/analyze<br/>POST /api/generate-dummy"]
+        analyzer["IAMAnalyzer — rule engine<br/>~20 escalation patterns → MITRE ATT&CK"]
+        detector["AIDetector<br/>optional second pass, then dedupe"]
+        remediator["Remediator<br/>cache · AI max 5 / request · rule fallback"]
+        visualizer["Visualizer<br/>attack graph · escalation chains · MITRE heatmap"]
+        api --> analyzer --> detector --> remediator --> visualizer
+    end
+
+    claude[["Anthropic Claude API<br/>claude-3-haiku-20240307"]]
+    note>"Claude is optional — with no ANTHROPIC_API_KEY the tool runs the rule engine only.<br/>No live AWS calls: IAM configs are pasted or generated, never fetched from an account."]
+
+    demo -->|"POST"| api
+    ui -->|"fetch — iam_config + config_type"| api
+    visualizer -->|"response JSON — findings + remediations + visualization + summary"| ui
+    detector -.->|"prompt"| claude
+    remediator -.->|"uncached calls"| claude
+    claude -.- note
+
+    classDef external stroke:#8957e5,stroke-width:2px
+    classDef muted stroke:#3fb950,stroke-width:1px,stroke-dasharray:5 3
+    class claude external
+    class note muted
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Browser                              │
-│  HTML + CSS + Vanilla JS + D3.js + Chart.js                     │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ HTTPS
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AWS EC2 (Flask + Gunicorn)                   │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
-│  │ iam_analyzer │ │  remediator  │ │  visualizer  │            │
-│  │  (parser)    │ │  (Claude AI) │ │  (D3 data)   │            │
-│  └──────────────┘ └──────────────┘ └──────────────┘            │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Anthropic Claude API                          │
-│              (claude-3-haiku-20240307)                          │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+Everything runs in one Flask process: `/api/generate-dummy` returns a hard-coded
+vulnerable config and `/api/analyze` runs the full pipeline in-process. With no
+`ANTHROPIC_API_KEY` the AI passes are skipped and the deterministic rule engine
+still produces every finding, remediation, and visualization — so the tool is
+fully explorable with just `pip install -r backend/requirements.txt`.
 
 ---
 
