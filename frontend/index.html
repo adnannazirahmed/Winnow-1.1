@@ -1,353 +1,229 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IAM Remediation Assistant — Security Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Winnow — IAM Remediation Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYzNjN2M2IiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIgMjJzOC00IDgtMTBWNWwtOC0zLTggM3Y3YzAgNiA4IDEwIDggMTB6Ii8+PHBhdGggZD0iTTkgMTJsMiAyIDQtNCIvPjwvc3ZnPg==">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Background mesh & particle overlay -->
-    <div class="bg-mesh"></div>
-    <div class="bg-glow-orb orb-1"></div>
-    <div class="bg-glow-orb orb-2"></div>
 
-    <div class="app-container">
-        <header class="header">
-            <div class="header-left">
-                <div class="logo-wrapper">
-                    <div class="logo-mark">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                            <path d="M9 12l2 2 4-4" stroke-opacity="0.9" stroke-width="2"></path>
-                        </svg>
-                    </div>
-                    <div class="logo-glow"></div>
-                </div>
-                <div class="brand">
-                    <h1>IAM Remediation<span class="brand-accent">Assistant</span></h1>
-                    <span class="brand-sub">AWS Security & Remediation Engine</span>
-                </div>
-
-            </div>
-            <div class="header-right">
-                <div class="status-indicator" id="status-indicator">
-                    <span class="dot"></span>
-                    <span>Ready</span>
-                </div>
-                <button id="theme-toggle" class="btn btn-icon" aria-label="Toggle theme" title="Toggle Light/Dark Theme">
-                    <svg id="theme-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                </button>
-            </div>
-        </header>
-
-        <main class="main-content">
-            <div class="controls-panel">
-                <div class="panel-header">
-                    <div>
-                        <h2 class="panel-title">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="panel-icon"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-                            Security Analysis Input
-                        </h2>
-                        <p class="panel-subtitle">Paste an AWS IAM configuration to detect privilege escalation paths and generate AI-powered remediation.</p>
-                    </div>
-                    <div class="panel-badge">
-                        <span class="badge-dot"></span> 31+ Escalation Patterns
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <div class="editor-header">
-                        <label for="config-input">IAM Configuration (JSON / HCL)</label>
-                        <div class="presets-toolbar">
-                            <span class="presets-label">Presets:</span>
-                            <button class="preset-btn" data-preset="admin-privexec" title="Load Admin Privilege Escalation Policy">PrivEsc Admin</button>
-                            <button class="preset-btn" data-preset="passrole-ec2" title="Load iam:PassRole Escalation Policy">PassRole EC2</button>
-                            <button class="preset-btn" data-preset="s3-wildcard" title="Load Wildcard S3 Policy">Wildcard S3</button>
-                        </div>
-                    </div>
-                    <div class="textarea-wrapper">
-                        <textarea id="config-input" placeholder="Paste Terraform plan, IAM policy JSON, or iam-vulnerable output..."></textarea>
-                        <div class="textarea-footer">
-                            <span class="syntax-badge">JSON / Terraform</span>
-                            <span class="char-count" id="char-count">0 characters</span>
-                        </div>
-                    </div>
-                    
-                    <div class="control-actions">
-                        <button id="analyze-btn" class="btn btn-primary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                            <span>Analyze & Remediate</span>
-                        </button>
-                        <button id="load-dummy-btn" class="btn btn-secondary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                            <span>Load Demo Data</span>
-                        </button>
-                        <button id="clear-btn" class="btn btn-ghost">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            <span>Clear</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="summary-cards" id="summary-cards">
-                <div class="card critical">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="critical-count">0</span>
-                        <span class="card-label">Critical</span>
-                    </div>
-                </div>
-                <div class="card high">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="high-count">0</span>
-                        <span class="card-label">High</span>
-                    </div>
-                </div>
-                <div class="card medium">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="medium-count">0</span>
-                        <span class="card-label">Medium</span>
-                    </div>
-                </div>
-                <div class="card low">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="low-count">0</span>
-                        <span class="card-label">Low</span>
-                    </div>
-                </div>
-                <div class="card total">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="total-count">0</span>
-                        <span class="card-label">Total</span>
-                    </div>
-                </div>
-                <div class="card ai">
-                    <div class="card-glow"></div>
-                    <div class="card-icon">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
-                    </div>
-                    <div class="card-info">
-                        <span class="card-value" id="ai-count">0</span>
-                        <span class="card-label">AI Suggested</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tabs-navigation">
-                <div class="tabs">
-                    <button class="tab-btn active" data-tab="attack-graph">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="5" r="3"/><circle cx="19" cy="5" r="3"/><circle cx="12" cy="19" r="3"/><line x1="8" y1="6.5" x2="16" y2="6.5"/><line x1="7.5" y1="8" x2="10.5" y2="17"/><line x1="16.5" y1="8" x2="13.5" y2="17"/></svg>
-                        Attack Graph
-                    </button>
-                    <button class="tab-btn" data-tab="vulnerabilities">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                        Vulnerabilities
-                    </button>
-                    <button class="tab-btn" data-tab="remediation">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                        Remediation
-                    </button>
-                    <button class="tab-btn" data-tab="visualizer">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                        Visualizer
-                    </button>
-                    <button class="tab-btn" data-tab="charts">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-                        Charts
-                    </button>
-                </div>
-            </div>
-
-            <div class="tab-panels">
-                <div class="tab-panel active" id="attack-graph">
-                    <div class="graph-container">
-                        <div class="graph-controls">
-                            <div class="select-wrapper">
-                                <select id="graph-layout">
-                                    <option value="grouped">Grouped Flow</option>
-                                    <option value="radial">Radial Layout</option>
-                                </select>
-                            </div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="show-mitre" checked>
-                                <span class="checkbox-custom"></span>
-                                Show MITRE
-                            </label>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="show-attack-paths" checked>
-                                <span class="checkbox-custom"></span>
-                                Show Labels
-                            </label>
-                            <span class="graph-spacer"></span>
-                            <span class="graph-count" id="graph-count"></span>
-                            <div class="graph-zoom">
-                                <button class="zoom-btn" id="graph-zoom-out" title="Zoom out">−</button>
-                                <button class="zoom-btn" id="graph-zoom-reset" title="Reset view">Reset</button>
-                                <button class="zoom-btn" id="graph-zoom-in" title="Zoom in">+</button>
-                            </div>
-                        </div>
-                        <div class="graph-legend" id="graph-legend"></div>
-                        <div class="graph-wrap">
-                            <svg id="attack-graph-svg" width="100%" height="520"></svg>
-                            <div class="graph-tooltip" id="graph-tooltip"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="tab-panel" id="vulnerabilities">
-                    <div class="table-toolbar">
-                        <div class="search-wrapper">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                            <input type="text" id="vuln-search-input" placeholder="Search vulnerabilities by title, ID, resource, or MITRE tag...">
-                        </div>
-                        <div class="table-stats-pill" id="vuln-count-pill">Showing findings</div>
-                    </div>
-                    <div class="table-container">
-                        <table id="vuln-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Title</th>
-                                    <th>Severity</th>
-                                    <th>Resource</th>
-                                    <th>Attack Path</th>
-                                    <th>MITRE</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="tab-panel" id="remediation">
-                    <div id="remediation-content">
-                        <div class="empty-state-container">
-                            <div class="empty-icon">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                            </div>
-                            <h3>No Vulnerability Selected</h3>
-                            <p class="empty-state">Select a finding from the Vulnerabilities table or Attack Graph to view AI-generated remediation policies.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="tab-panel" id="visualizer">
-                    <div class="viz-grid top-row">
-                        <div class="viz-card">
-                            <div class="viz-card-header">
-                                <h3>Privilege Escalation Chains</h3>
-                                <span class="viz-tag">Attack Flow</span>
-                            </div>
-                            <div id="escalation-chains"></div>
-                        </div>
-                        <div class="viz-card">
-                            <div class="viz-card-header">
-                                <h3>MITRE ATT&CK Heatmap</h3>
-                                <span class="viz-tag">Techniques</span>
-                            </div>
-                            <div id="mitre-heatmap"></div>
-                        </div>
-                        <div class="viz-card full-width">
-                            <div class="viz-card-header">
-                                <h3>Resource Risk Map</h3>
-                                <span class="viz-tag">AWS Infrastructure</span>
-                            </div>
-                            <div id="resource-risk-map"></div>
-                        </div>
-                        <div class="viz-card full-width">
-                            <div class="viz-card-header">
-                                <h3>Remediation Action Timeline</h3>
-                                <span class="viz-tag">Priority Schedule</span>
-                            </div>
-                            <div id="remediation-timeline"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="tab-panel" id="charts">
-                    <div class="charts-grid">
-                        <div class="chart-card">
-                            <div class="viz-card-header">
-                                <h3>Severity Distribution</h3>
-                                <span class="viz-tag">Breakdown</span>
-                            </div>
-                            <div class="chart-wrapper">
-                                <canvas id="severity-chart" height="280"></canvas>
-                            </div>
-                        </div>
-                        <div class="chart-card">
-                            <div class="viz-card-header">
-                                <h3>Resource Risk Radar</h3>
-                                <span class="viz-tag">Exposure</span>
-                            </div>
-                            <div class="chart-wrapper">
-                                <canvas id="radar-chart" height="280"></canvas>
-                            </div>
-                        </div>
-                        <div class="chart-card">
-                            <div class="viz-card-header">
-                                <h3>Remediation Actions by Priority</h3>
-                                <span class="viz-tag">Workflow</span>
-                            </div>
-                            <div class="chart-wrapper">
-                                <canvas id="progress-chart" height="280"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-
-        <footer class="footer">
-            <div class="footer-content">
-                <p class="footer-title">IAM Remediation Assistant — Security Operations Platform</p>
-                <p class="footer-meta">Powered by Anthropic Claude 3 AI & Bishop Fox <code>iam-vulnerable</code> Engine</p>
-            </div>
-        </footer>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Winnow</div>
+        <div class="brand-sub">IAM Remediation</div>
+      </div>
     </div>
 
-    <div class="modal" id="detail-modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="modal-title">Vulnerability Details</h2>
-                <button class="modal-close" id="modal-close" aria-label="Close modal">&times;</button>
+    <nav class="nav" id="nav"></nav>
+
+    <div class="sidebar-foot">
+      <button class="search-trigger" id="palette-open">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+        <span>Search</span>
+        <span class="kbd">⌘K</span>
+      </button>
+      <div class="status-row">
+        <span class="status-dot"></span>
+        <span class="status-text" id="status-text">Rule engine · ready</span>
+        <button class="icon-btn" id="theme-toggle" title="Toggle theme"></button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Analysis · terraform plan</div>
+        <h1 id="view-title">Posture overview</h1>
+      </div>
+      <span class="spacer"></span>
+      <div class="pill-row">
+        <span class="pill" id="stat-findings">21 findings</span>
+        <span class="pill" id="stat-identities">5 identities</span>
+        <span class="pill" id="stat-techniques">6 techniques</span>
+      </div>
+      <button class="btn btn-primary" id="reanalyze">Re-analyze</button>
+    </header>
+
+    <div class="view-wrap">
+
+      <!-- OVERVIEW -->
+      <section class="view active" data-view="overview">
+        <div class="grid-hero">
+          <div class="hero">
+            <div class="hero-canvas" id="hero-canvas"></div>
+            <div class="hero-copy">
+              <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--n-mute)">Posture</div>
+              <div class="hero-title" id="hero-title">Twelve critical<br>escalation paths</div>
+              <div class="hero-note" id="hero-note">VulnerableAdminPolicy alone reaches administrator through nine distinct actions.</div>
             </div>
-            <div class="modal-body" id="modal-body"></div>
+            <div class="hero-foot">
+              <span class="pill" id="hero-risk">risk 100/100</span>
+              <span class="pill" id="hero-actions">24 actions · 50h</span>
+            </div>
+          </div>
+          <div class="grid-metrics" id="metrics"></div>
         </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head"><span class="panel-title">Resource risk</span><span class="panel-meta">weighted</span></div>
+            <div class="panel-body" id="risk-list"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title">Top findings</span>
+              <button class="btn btn-sm" data-goto="findings" style="border-color:transparent;color:var(--n-mute)">All findings →</button>
+            </div>
+            <div id="top-findings"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ATTACK GRAPH (3D) -->
+      <section class="view" data-view="graph">
+        <div class="graph-toolbar">
+          <button class="chip" id="t-ident" aria-pressed="true">Identities on</button>
+          <button class="chip" id="t-mitre" aria-pressed="true">MITRE on</button>
+          <button class="chip" id="t-spin" aria-pressed="true">Auto-orbit</button>
+          <span class="spacer"></span>
+          <span class="hint">drag to orbit · scroll to zoom · click a node</span>
+          <button class="btn btn-sm" id="reset-cam">Reset view</button>
+        </div>
+
+        <div class="graph-layout">
+          <div class="graph-stage">
+            <div class="graph-canvas" id="graph-canvas"></div>
+            <div class="graph-cols"><span>IDENTITIES</span><span>FINDINGS</span><span>MITRE ATT&amp;CK</span></div>
+            <div class="legend">
+              <span><i class="swatch box"></i>Identity</span>
+              <span><i class="swatch" style="background:var(--n-crit)"></i>Critical</span>
+              <span><i class="swatch" style="background:var(--n-high)"></i>High</span>
+              <span><i class="swatch" style="background:var(--n-med)"></i>Medium</span>
+              <span><i class="swatch diamond"></i>Technique</span>
+            </div>
+          </div>
+
+          <div class="panel inspector" id="inspector"></div>
+        </div>
+      </section>
+
+      <!-- FINDINGS -->
+      <section class="view" data-view="findings">
+        <div class="filters">
+          <div class="search-field">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            <input type="text" id="finding-search" placeholder="Filter by title, id, resource, technique">
+          </div>
+          <div class="filters" id="sev-filters"></div>
+          <span class="spacer"></span>
+          <span class="hint" id="shown-count">21 of 21</span>
+        </div>
+        <div class="panel">
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Resource</th><th>MITRE</th><th></th></tr>
+            </thead>
+            <tbody id="findings-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- REMEDIATION -->
+      <section class="view" data-view="remediation">
+        <div class="rem-layout">
+          <div class="rem-col">
+            <div class="panel rem-header" id="rem-header"></div>
+            <div class="rem-col" id="rem-actions"></div>
+            <div class="panel">
+              <div class="panel-head">
+                <span class="panel-title">Hardened policy</span>
+                <button class="btn btn-sm" id="copy-policy">Copy</button>
+              </div>
+              <div class="code" style="border:0;border-radius:0"><pre id="hardened-policy"></pre></div>
+            </div>
+          </div>
+          <div class="rem-col">
+            <div class="panel" style="padding:16px">
+              <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--n-mute);margin-bottom:10px">Compliance</div>
+              <div class="checklist" id="compliance"></div>
+            </div>
+            <div class="panel" style="padding:16px">
+              <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--n-mute);margin-bottom:10px">Queue</div>
+              <div class="queue" id="queue-mini"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VISUALIZER -->
+      <section class="view" data-view="visualizer">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head"><span class="panel-title">Escalation chains</span><span class="panel-meta" id="chain-count">3 identities</span></div>
+            <div class="panel-body" id="chains" style="gap:14px"></div>
+          </div>
+          <div class="rem-col">
+            <div class="panel">
+              <div class="panel-head"><span class="panel-title">MITRE ATT&amp;CK coverage</span><span class="panel-meta" id="tech-count">6 techniques</span></div>
+              <div class="panel-body" id="heatmap" style="gap:13px"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="panel-title">Remediation queue</span><span class="panel-meta" id="queue-total">50h total</span></div>
+              <div class="panel-body queue" id="queue-full" style="gap:9px"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHARTS -->
+      <section class="view" data-view="charts">
+        <div class="grid-charts">
+          <div class="panel chart-card">
+            <div class="head"><span class="panel-title">Severity distribution</span><span class="panel-meta" id="chart-sev-meta">21 findings</span></div>
+            <div class="chart-holder" id="chart-severity"></div>
+          </div>
+          <div class="panel chart-card">
+            <div class="head"><span class="panel-title">Resource exposure</span><span class="panel-meta">risk 0–100</span></div>
+            <div class="chart-holder" id="chart-radar"></div>
+          </div>
+          <div class="panel chart-card">
+            <div class="head"><span class="panel-title">Actions by priority</span><span class="panel-meta" id="chart-pri-meta">24 actions</span></div>
+            <div class="chart-holder" id="chart-priority"></div>
+          </div>
+        </div>
+      </section>
+
     </div>
+  </main>
+</div>
 
-    <!-- Toast Notification -->
-    <div id="toast-notification" class="toast">Code copied to clipboard!</div>
+<div class="palette-backdrop" id="palette-backdrop" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-input">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      <input type="text" id="palette-input" placeholder="Jump to a view, finding, or technique" autocomplete="off">
+      <span class="kbd">esc</span>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+  </div>
+</div>
 
-    <script src="script.js"></script>
+<!-- three.js is served from jsdelivr, not unpkg: the backend CSP in app.py
+     allowlists cdn.jsdelivr.net but not unpkg.com, so an unpkg tag would be
+     blocked and both 3D scenes would silently fail to mount. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="scenes.js"></script>
+<script src="script.js"></script>
 </body>
 </html>

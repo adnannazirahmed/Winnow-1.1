@@ -1,1152 +1,764 @@
-const API_BASE = '/api';
+/* Winnow — front-end controller.
+   Vanilla ES5-compatible, no build step. Loaded after scenes.js.
 
-let currentData = null;
-let currentVulnerability = null;
-let charts = {};
+   Data flow: on load we POST the demo IAM config to the Flask API and normalise
+   the response into the shape the views expect. If the API is not reachable
+   (static preview) we fall back to DEMO_RESULT so the UI is never empty.
 
-const SAMPLE_PRESETS = {
-    'admin-privexec': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "AllowPolicyManagement",
-                "Effect": "Allow",
-                "Action": [
-                    "iam:CreatePolicyVersion",
-                    "iam:SetDefaultPolicyVersion",
-                    "iam:AttachUserPolicy",
-                    "iam:PutUserPolicy",
-                    "iam:CreateAccessKey"
-                ],
-                "Resource": "*"
-            }
-        ]
-    },
-    'passrole-ec2': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "AllowInstancePassRole",
-                "Effect": "Allow",
-                "Action": [
-                    "iam:PassRole",
-                    "ec2:RunInstances",
-                    "ec2:CreateInstanceProfile",
-                    "ec2:AddRoleToInstanceProfile"
-                ],
-                "Resource": "*"
-            }
-        ]
-    },
-    's3-wildcard': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "OverprivilegedS3Access",
-                "Effect": "Allow",
-                "Action": "s3:*",
-                "Resource": [
-                    "arn:aws:s3:::prod-customer-data",
-                    "arn:aws:s3:::prod-customer-data/*"
-                ]
-            }
-        ]
-    }
-};
+   The mapping below is written against the REAL /api/analyze contract in
+   backend/app.py, verified against a live response:
 
-// localStorage throws in private mode and on opaque origins; never let a
-// preference read break rendering.
-const safeStorage = {
-    get(key, fallback = null) {
-        try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
-    },
-    set(key, value) {
-        try { localStorage.setItem(key, value); } catch { /* preferences are best-effort */ }
-    }
-};
+     { vulnerabilities: [ { id, pattern_id, title, description, severity,
+                            resource_type, resource_name, policy_document,
+                            attack_path: [str], mitre_techniques: [str],
+                            remediation_hint, detection_source } ],
+       remediations:    [ { vulnerability, remediation: { vulnerability_id,
+                            original_severity, risk_score, summary, actions:
+                            [{action, description, priority, code_example,
+                              explanation}], hardened_policy, compliance_notes,
+                            source } } ],
+       visualization:   { attack_graph, severity_distribution, resource_risk_map,
+                          remediation_timeline, mitre_heatmap,
+                          privilege_escalation_chains, summary_stats },
+       summary:         { total_vulnerabilities, critical, high, medium, low,
+                          ai_suggested } }
 
-document.addEventListener('DOMContentLoaded', () => {
-    initializeTheme();
-    initializeEventListeners();
-    initializePresetButtons();
-    updateCharCount();
-    loadDummyData();
-});
+   Note attack_path is an ARRAY of steps, not a string, and the backend already
+   computes the technique names/tactics, per-resource risk scores and the
+   remediation queue — so we consume those rather than re-deriving them.
+*/
+(function () {
+  'use strict';
 
-function initializeTheme() {
-    const savedTheme = safeStorage.get('theme', 'dark') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    updateThemeIcon(savedTheme);
-}
+  var API = '/api/analyze';
 
-function updateThemeIcon(theme) {
-    const icon = document.getElementById('theme-icon');
-    if (!icon) return;
-    if (theme === 'dark') {
-        icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+  var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
+  var SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+
+  /* ---------------- demo IAM configuration (posted to the analyzer) ---------------- */
+
+  var DEMO_CONFIG = {
+    resources: [
+      { type: 'aws_iam_policy', name: 'VulnerableAdminPolicy', values: { name: 'VulnerableAdminPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['iam:AttachUserPolicy', 'iam:PutUserPolicy', 'iam:CreateAccessKey', 'iam:UpdateLoginProfile', 'sts:AssumeRole', 'iam:PassRole', 'iam:CreateRole', 'iam:PutRolePolicy', 'iam:AttachRolePolicy', 'iam:UpdateAssumeRolePolicy', 'ec2:RunInstances', 'lambda:CreateFunction', 'lambda:UpdateFunctionCode'], Resource: '*' }] } } },
+      { type: 'aws_iam_role', name: 'VulnerableEC2Role', values: { name: 'VulnerableEC2Role', attached_policy_arns: ['arn:aws:iam::123456789012:policy/VulnerableAdminPolicy'] } },
+      { type: 'aws_iam_user', name: 'CompromisedUser', values: { name: 'CompromisedUser', attached_policy_arns: ['arn:aws:iam::123456789012:policy/ReadOnlyAccess'], policy: [{ name: 'InlineEscalationPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['iam:AttachUserPolicy', 'iam:CreateAccessKey'], Resource: '*' }] } }] } },
+      { type: 'aws_iam_policy', name: 'LambdaEscalationPolicy', values: { name: 'LambdaEscalationPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['lambda:CreateFunction', 'lambda:UpdateFunctionCode', 'iam:PassRole'], Resource: '*' }] } } },
+      { type: 'aws_iam_group', name: 'DevelopersGroup', values: { name: 'DevelopersGroup', attached_policy_arns: ['arn:aws:iam::aws:policy/PowerUserAccess'], policy: [] } }
+    ]
+  };
+
+  /* ---------------- fallback dataset (offline preview only) ---------------- */
+
+  function F(id, title, severity, resource, resourceType, mitre, path, description) {
+    return { id: id, title: title, severity: severity, resource: resource, resource_type: resourceType, mitre: mitre, attack_path: path, description: description, detection_source: 'rule' };
+  }
+  var AP = 'VulnerableAdminPolicy', CU = 'CompromisedUser', LP = 'LambdaEscalationPolicy';
+
+  var DEMO_RESULT = {
+    findings: [
+      F('VULN-0001', 'User Can Attach Admin Policy', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.001'], 'Identity: VulnerableAdminPolicy → Action: iam:AttachUserPolicy → Target Resources: *', 'Allows attaching any managed policy including AdministratorAccess (Action: iam:AttachUserPolicy)'),
+      F('VULN-0002', 'User Can Put Inline Policy', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.001'], 'Identity: VulnerableAdminPolicy → Action: iam:PutUserPolicy → Target Resources: *', 'Allows creating inline policies with arbitrary permissions (Action: iam:PutUserPolicy)'),
+      F('VULN-0003', 'Create Access Keys for Other Users', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.004'], 'Identity: VulnerableAdminPolicy → Action: iam:CreateAccessKey → Target Resources: *', 'Can create access keys for any user, enabling credential theft (Action: iam:CreateAccessKey)'),
+      F('VULN-0004', 'Update Login Profile', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.005'], 'Identity: VulnerableAdminPolicy → Action: iam:UpdateLoginProfile → Target Resources: *', 'Can change password for any user (Action: iam:UpdateLoginProfile)'),
+      F('VULN-0005', 'Role Assumption', 'CRITICAL', AP, 'aws_iam_policy', ['T1550.001'], 'Identity: VulnerableAdminPolicy → Action: sts:AssumeRole → Target Resources: *', 'Can assume roles with elevated permissions (Action: sts:AssumeRole)'),
+      F('VULN-0006', 'Pass Role to Services', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.003'], 'Identity: VulnerableAdminPolicy → Action: iam:PassRole → Target Resources: *', 'Can pass privileged roles to EC2, Lambda, etc. (Action: iam:PassRole)'),
+      F('VULN-0007', 'Create Role', 'HIGH', AP, 'aws_iam_policy', ['T1098.003'], 'Identity: VulnerableAdminPolicy → Action: iam:CreateRole → Target Resources: *', 'Can create roles with arbitrary trust policies (Action: iam:CreateRole)'),
+      F('VULN-0008', 'Put Role Policy', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.003'], 'Identity: VulnerableAdminPolicy → Action: iam:PutRolePolicy → Target Resources: *', 'Can attach inline policies to any role (Action: iam:PutRolePolicy)'),
+      F('VULN-0009', 'Attach Role Policy', 'CRITICAL', AP, 'aws_iam_policy', ['T1098.003'], 'Identity: VulnerableAdminPolicy → Action: iam:AttachRolePolicy → Target Resources: *', 'Can attach managed policies to any role (Action: iam:AttachRolePolicy)'),
+      F('VULN-0010', 'Update Assume Role Policy', 'CRITICAL', AP, 'aws_iam_policy', ['T1550.001'], 'Identity: VulnerableAdminPolicy → Action: iam:UpdateAssumeRolePolicy → Target Resources: *', 'Can modify trust policy to allow self-assumption (Action: iam:UpdateAssumeRolePolicy)'),
+      F('VULN-0011', 'Run Instances with Role', 'HIGH', AP, 'aws_iam_policy', ['T1611'], 'Identity: VulnerableAdminPolicy → Action: ec2:RunInstances → Target Resources: *', 'Can launch EC2 with instance profile for privilege escalation (Action: ec2:RunInstances)'),
+      F('VULN-0012', 'Create Lambda Function', 'HIGH', AP, 'aws_iam_policy', ['T1611'], 'Identity: VulnerableAdminPolicy → Action: lambda:CreateFunction → Target Resources: *', 'Can create Lambda with privileged execution role (Action: lambda:CreateFunction)'),
+      F('VULN-0013', 'Update Lambda Code', 'HIGH', AP, 'aws_iam_policy', ['T1611'], 'Identity: VulnerableAdminPolicy → Action: lambda:UpdateFunctionCode → Target Resources: *', 'Can modify Lambda code to execute arbitrary commands (Action: lambda:UpdateFunctionCode)'),
+      F('VULN-0014', 'Attached Managed Policy: VulnerableAdminPolicy', 'MEDIUM', 'VulnerableEC2Role', 'aws_iam_role', ['T1098.001'], 'Identity: VulnerableEC2Role → Policy: arn:aws:iam::123456789012:policy/VulnerableAdminPolicy', 'aws_iam_role VulnerableEC2Role has managed policy attached'),
+      F('VULN-0015', 'Attached Managed Policy: ReadOnlyAccess', 'MEDIUM', CU, 'aws_iam_user', ['T1098.001'], 'Identity: CompromisedUser → Policy: arn:aws:iam::123456789012:policy/ReadOnlyAccess', 'aws_iam_user CompromisedUser has managed policy attached'),
+      F('VULN-0016', 'User Can Attach Admin Policy', 'CRITICAL', CU, 'aws_iam_user', ['T1098.001'], 'Identity: CompromisedUser → Action: iam:AttachUserPolicy → Target Resources: *', 'Allows attaching any managed policy including AdministratorAccess (Action: iam:AttachUserPolicy)'),
+      F('VULN-0017', 'Create Access Keys for Other Users', 'CRITICAL', CU, 'aws_iam_user', ['T1098.004'], 'Identity: CompromisedUser → Action: iam:CreateAccessKey → Target Resources: *', 'Can create access keys for any user, enabling credential theft (Action: iam:CreateAccessKey)'),
+      F('VULN-0018', 'Create Lambda Function', 'HIGH', LP, 'aws_iam_policy', ['T1611'], 'Identity: LambdaEscalationPolicy → Action: lambda:CreateFunction → Target Resources: *', 'Can create Lambda with privileged execution role (Action: lambda:CreateFunction)'),
+      F('VULN-0019', 'Update Lambda Code', 'HIGH', LP, 'aws_iam_policy', ['T1611'], 'Identity: LambdaEscalationPolicy → Action: lambda:UpdateFunctionCode → Target Resources: *', 'Can modify Lambda code to execute arbitrary commands (Action: lambda:UpdateFunctionCode)'),
+      F('VULN-0020', 'Pass Role to Services', 'CRITICAL', LP, 'aws_iam_policy', ['T1098.003'], 'Identity: LambdaEscalationPolicy → Action: iam:PassRole → Target Resources: *', 'Can pass privileged roles to EC2, Lambda, etc. (Action: iam:PassRole)'),
+      F('VULN-0021', 'Attached Managed Policy: PowerUserAccess', 'MEDIUM', 'DevelopersGroup', 'aws_iam_group', ['T1098.001'], 'Identity: DevelopersGroup → Policy: arn:aws:iam::aws:policy/PowerUserAccess', 'aws_iam_group DevelopersGroup has managed policy attached')
+    ],
+    techniques: [
+      { id: 'T1098.001', name: 'Additional Cloud Credentials', tactic: 'Persistence', count: 6 },
+      { id: 'T1098.003', name: 'Additional Cloud Roles', tactic: 'Persistence', count: 5 },
+      { id: 'T1611', name: 'Escape to Host', tactic: 'Privilege Escalation', count: 5 },
+      { id: 'T1550.001', name: 'Application Access Token', tactic: 'Lateral Movement', count: 2 },
+      { id: 'T1098.004', name: 'Additional Access Keys', tactic: 'Persistence', count: 2 },
+      { id: 'T1098.005', name: 'Change Login Profile', tactic: 'Persistence', count: 1 }
+    ],
+    risks: [
+      { name: AP, critical: 9, high: 4, medium: 0, low: 0, total: 13, score: 100 },
+      { name: CU, critical: 2, high: 0, medium: 1, low: 0, total: 3, score: 58 },
+      { name: LP, critical: 1, high: 2, medium: 0, low: 0, total: 3, score: 55 },
+      { name: 'VulnerableEC2Role', critical: 0, high: 0, medium: 1, low: 0, total: 1, score: 8 },
+      { name: 'DevelopersGroup', critical: 0, high: 0, medium: 1, low: 0, total: 1, score: 8 }
+    ],
+    queue: [
+      ['Remove iam:AttachUserPolicy/AttachRolePolicy', 'CRITICAL', 4],
+      ['Remove iam:PutUserPolicy/PutRolePolicy', 'CRITICAL', 4],
+      ['Restrict Role Assumption with Conditions', 'HIGH', 2],
+      ['Restrict iam:PassRole to Specific Roles', 'HIGH', 2],
+      ['Restrict CreateAccessKey to Self', 'HIGH', 2],
+      ['Restrict UpdateLoginProfile to Self', 'HIGH', 2],
+      ['Apply Permissions Boundary', 'HIGH', 2],
+      ['Use Permissions Boundary for Role Creation', 'HIGH', 2],
+      ['Restrict Service Role Passing', 'MEDIUM', 1],
+      ['Review Attached Managed Policy', 'MEDIUM', 1]
+    ],
+    remediations: {},
+    aiCount: 0
+  };
+
+  /* Offline-only remediation copy. When the API answers, the backend's own
+     Remediator output is used instead of this table. */
+  var STRATEGY_ACTIONS = {
+    attach_policy: [
+      { name: 'Remove iam:AttachUserPolicy/AttachRolePolicy', priority: 'CRITICAL',
+        description: 'Remove the ability to attach arbitrary managed policies. If attachment is needed, restrict to specific policy ARNs using condition keys.',
+        code: { Before: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: 'arn:aws:iam::123456789012:policy/SpecificPolicy' } },
+        explanation: 'Wildcard attachment allows escalation to AdministratorAccess. Restrict to specific approved policies.' },
+      { name: 'Apply Permissions Boundary', priority: 'HIGH',
+        description: 'Set a permissions boundary on the identity to limit maximum permissions regardless of attached policies.',
+        code: { PermissionsBoundary: 'arn:aws:iam::123456789012:policy/DeveloperBoundary' },
+        explanation: 'Permissions boundaries provide a guardrail that cannot be bypassed by attaching policies.' }
+    ],
+    pass_role: [
+      { name: 'Restrict iam:PassRole to Specific Roles', priority: 'HIGH',
+        description: 'Limit which roles can be passed to services like EC2 and Lambda.',
+        code: { Before: { Effect: 'Allow', Action: 'iam:PassRole', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:PassRole', Resource: 'arn:aws:iam::123456789012:role/AppSpecificRole' } },
+        explanation: 'Prevents passing privileged roles (e.g. AdminRole) to compute resources.' }
+    ],
+    access_key: [
+      { name: 'Restrict CreateAccessKey to Self', priority: 'HIGH',
+        description: 'Add a condition so access keys can only be created for the calling user.',
+        code: { Before: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: 'arn:aws:iam::123456789012:user/${aws:username}' } },
+        explanation: 'Prevents creating access keys for other users (credential theft).' }
+    ],
+    managed_policy_review: [
+      { name: 'Review Attached Managed Policy', priority: 'MEDIUM',
+        description: 'Audit the attached managed policy for excessive permissions and replace it with a scoped custom policy.',
+        code: { Review: 'aws iam get-policy-version --policy-arn <arn> --version-id <default>' },
+        explanation: 'Broad AWS-managed policies (e.g. PowerUserAccess) usually exceed what the identity needs.' }
+    ]
+  };
+
+  var RISK_BY_SEV = { CRITICAL: 95, HIGH: 75, MEDIUM: 50, LOW: 25 };
+
+  function strategyFor(f) {
+    if (f.title.indexOf('Attached Managed Policy') === 0) return 'managed_policy_review';
+    if (f.title.indexOf('Attach') === 0 || f.title.indexOf('User Can Attach') === 0) return 'attach_policy';
+    if (f.title === 'Pass Role to Services') return 'pass_role';
+    if (f.title === 'Create Access Keys for Other Users') return 'access_key';
+    return 'attach_policy';
+  }
+
+  /* ---------------- state ---------------- */
+
+  var state = {
+    view: 'overview',
+    theme: localStorage.getItem('winnow-theme') || 'dark',
+    data: DEMO_RESULT,
+    groups: [],
+    selId: null,
+    query: '',
+    sev: 'ALL',
+    showIdent: true,
+    showMitre: true,
+    spin: true,
+    paletteOpen: false,
+    paletteIndex: 0
+  };
+
+  var hero = null, graph = null;
+
+  var NAV = [
+    ['overview', 'Overview', ['M3 12l9-9 9 9', 'M5 10v10h14V10']],
+    ['graph', 'Attack graph', ['M5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M19 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M12 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M8 6.5h8', 'M7.5 8l3 9', 'M16.5 8l-3 9']],
+    ['findings', 'Findings', ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8']],
+    ['remediation', 'Remediation', ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z']],
+    ['visualizer', 'Visualizer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
+    ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']]
+  ];
+  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Remediation plan', visualizer: 'Visualizer', charts: 'Charts' };
+
+  /* ---------------- helpers ---------------- */
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  function icon(paths, size) {
+    return '<svg width="' + (size || 14) + '" height="' + (size || 14) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      paths.map(function (d) { return '<path d="' + d + '"/>'; }).join('') + '</svg>';
+  }
+  function countBy(sev) { return state.data.findings.filter(function (f) { return f.severity === sev; }).length; }
+  function totalHours() { return state.data.queue.reduce(function (a, q) { return a + (Number(q[2]) || 0); }, 0); }
+  function findingById(id) {
+    var all = state.data.findings;
+    for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
+    return all[0];
+  }
+
+  /* Group findings by resource — the identity column of the graph. */
+  function computeGroups() {
+    var order = [], byName = {};
+    state.data.findings.forEach(function (f) {
+      if (!byName[f.resource]) { byName[f.resource] = { name: f.resource, type: f.resource_type, ids: [] }; order.push(byName[f.resource]); }
+      byName[f.resource].ids.push(f.id);
+    });
+    order.sort(function (a, b) { return b.ids.length - a.ids.length; });
+    state.groups = order;
+  }
+
+  /* Map the /api/analyze response onto the view model. Keys here match the
+     verified contract; there are no speculative fallbacks left. */
+  function normalise(payload) {
+    if (!payload) return DEMO_RESULT;
+    var raw = payload.vulnerabilities || [];
+    if (!raw.length) return DEMO_RESULT;
+
+    var findings = raw.map(function (f) {
+      var path = f.attack_path;
+      return {
+        id: f.id,
+        title: f.title || 'Unnamed finding',
+        severity: String(f.severity || 'MEDIUM').toUpperCase(),
+        resource: f.resource_name || 'unknown',
+        resource_type: f.resource_type || '',
+        mitre: f.mitre_techniques || [],
+        /* attack_path arrives as an array of steps. */
+        attack_path: Array.isArray(path) ? path.join(' → ') : (path || ''),
+        description: f.description || '',
+        detection_source: f.detection_source || 'rule'
+      };
+    });
+
+    var viz = payload.visualization || {};
+
+    /* The backend resolves technique names and tactics from its MITRE table;
+       only rebuild the histogram if that section is missing. */
+    var techniques;
+    var heat = viz.mitre_heatmap && viz.mitre_heatmap.techniques;
+    if (heat && heat.length) {
+      techniques = heat.map(function (t) {
+        return { id: t.id, name: t.name || t.id, tactic: t.tactic || '', count: t.count || 0 };
+      });
     } else {
-        icon.innerHTML = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
-    }
-}
-
-function initializeEventListeners() {
-    const themeBtn = document.getElementById('theme-toggle');
-    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
-
-    const analyzeBtn = document.getElementById('analyze-btn');
-    if (analyzeBtn) analyzeBtn.addEventListener('click', analyzeConfig);
-
-    const dummyBtn = document.getElementById('load-dummy-btn');
-    if (dummyBtn) dummyBtn.addEventListener('click', loadDummyData);
-
-    const clearBtn = document.getElementById('clear-btn');
-    if (clearBtn) clearBtn.addEventListener('click', clearConfig);
-
-    const modalClose = document.getElementById('modal-close');
-    if (modalClose) modalClose.addEventListener('click', closeModal);
-
-    const modal = document.getElementById('detail-modal');
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target.id === 'detail-modal') closeModal();
+      var techMap = {};
+      findings.forEach(function (f) {
+        f.mitre.forEach(function (t) {
+          if (!techMap[t]) techMap[t] = { id: t, name: t, tactic: '', count: 0 };
+          techMap[t].count++;
         });
+      });
+      techniques = Object.keys(techMap).map(function (k) { return techMap[k]; })
+        .sort(function (a, b) { return b.count - a.count; });
     }
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    /* Same for the weighted per-resource risk score. */
+    var risks;
+    var rr = viz.resource_risk_map && viz.resource_risk_map.resources;
+    if (rr && rr.length) {
+      risks = rr.map(function (r) {
+        return { name: r.name, critical: r.critical || 0, high: r.high || 0, medium: r.medium || 0, low: r.low || 0, total: r.total || 0, score: r.risk_score || 0 };
+      });
+    } else {
+      var riskMap = {};
+      findings.forEach(function (f) {
+        var r = riskMap[f.resource] || (riskMap[f.resource] = { name: f.resource, critical: 0, high: 0, medium: 0, low: 0, total: 0, score: 0 });
+        r.total++;
+        if (f.severity === 'CRITICAL') r.critical++;
+        else if (f.severity === 'HIGH') r.high++;
+        else if (f.severity === 'LOW') r.low++;
+        else r.medium++;
+      });
+      risks = Object.keys(riskMap).map(function (k) { return riskMap[k]; });
+      var maxW = 1;
+      risks.forEach(function (r) { r._w = r.critical * 10 + r.high * 5 + r.medium * 2 + r.low; maxW = Math.max(maxW, r._w); });
+      risks.forEach(function (r) { r.score = Math.round((r._w / maxW) * 100); });
+      risks.sort(function (a, b) { return b.score - a.score; });
+    }
+
+    /* The remediation queue is the backend's timeline, already sorted by
+       priority and carrying its own hour estimates. */
+    var items = (viz.remediation_timeline && viz.remediation_timeline.items) || [];
+    var queue = items.map(function (i) {
+      return [i.action || '', String(i.priority || 'MEDIUM').toUpperCase(), Number(i.estimated_hours) || 0];
+    });
+    if (!queue.length) queue = DEMO_RESULT.queue;
+
+    /* Index the real remediations by vulnerability id. */
+    var remediations = {};
+    (payload.remediations || []).forEach(function (entry) {
+      var rem = entry && entry.remediation;
+      if (!rem) return;
+      var key = rem.vulnerability_id || (entry.vulnerability && entry.vulnerability.id);
+      if (key) remediations[key] = rem;
     });
 
-    const rerenderGraph = () => {
-        if (currentData && currentData.visualization) renderAttackGraph(currentData.visualization.attack_graph);
-    };
+    var aiCount = (payload.summary && payload.summary.ai_suggested) || 0;
 
-    const layoutSel = document.getElementById('graph-layout');
-    if (layoutSel) layoutSel.addEventListener('change', rerenderGraph);
+    return { findings: findings, techniques: techniques, risks: risks, queue: queue, remediations: remediations, aiCount: aiCount };
+  }
 
-    const mitreChk = document.getElementById('show-mitre');
-    if (mitreChk) mitreChk.addEventListener('change', rerenderGraph);
+  /* ---------------- rendering ---------------- */
 
-    const labelsChk = document.getElementById('show-attack-paths');
-    if (labelsChk) labelsChk.addEventListener('change', rerenderGraph);
+  function renderNav() {
+    $('nav').innerHTML = NAV.map(function (n) {
+      var id = n[0];
+      var count = id === 'findings' ? state.data.findings.length
+        : id === 'remediation' ? state.data.queue.length
+        : id === 'graph' ? '3D' : '';
+      return '<button class="nav-item" data-goto="' + id + '"' + (state.view === id ? ' aria-current="page"' : '') + '>' +
+        icon(n[2], 14) + '<span class="label">' + esc(n[1]) + '</span><span class="count">' + esc(count) + '</span></button>';
+    }).join('');
+  }
 
-    const zoomIn = document.getElementById('graph-zoom-in');
-    if (zoomIn) zoomIn.addEventListener('click', () => {
-        if (window.__graphView) window.__graphView.svg.transition().duration(200).call(window.__graphView.zoom.scaleBy, 1.25);
-    });
+  function renderTopbar() {
+    $('view-title').textContent = TITLES[state.view];
+    $('stat-findings').textContent = state.data.findings.length + ' findings';
+    $('stat-identities').textContent = state.groups.length + ' identities';
+    $('stat-techniques').textContent = state.data.techniques.length + ' techniques';
+  }
 
-    const zoomOut = document.getElementById('graph-zoom-out');
-    if (zoomOut) zoomOut.addEventListener('click', () => {
-        if (window.__graphView) window.__graphView.svg.transition().duration(200).call(window.__graphView.zoom.scaleBy, 0.8);
-    });
-
-    const zoomReset = document.getElementById('graph-zoom-reset');
-    if (zoomReset) zoomReset.addEventListener('click', () => {
-        if (window.__graphView) window.__graphView.svg.transition().duration(300).call(window.__graphView.zoom.transform, d3.zoomIdentity);
-    });
-
-    const inputArea = document.getElementById('config-input');
-    if (inputArea) {
-        inputArea.addEventListener('input', updateCharCount);
-        inputArea.addEventListener('keydown', (e) => {
-            if (e.key === 'Tab') {
-                e.preventDefault();
-                const start = e.target.selectionStart;
-                const end = e.target.selectionEnd;
-                e.target.value = e.target.value.substring(0, start) + '  ' + e.target.value.substring(end);
-                e.target.selectionStart = e.target.selectionEnd = start + 2;
-                updateCharCount();
-            }
-        });
+  function renderOverview() {
+    var crit = countBy('CRITICAL'), high = countBy('HIGH'), med = countBy('MEDIUM'), low = countBy('LOW');
+    var top = state.data.risks[0];
+    var words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+    $('hero-title').innerHTML = esc(words[crit] || crit) + ' critical<br>escalation paths';
+    if (top) {
+      $('hero-note').textContent = top.name + ' alone carries ' + top.critical + ' critical findings.';
+      $('hero-risk').textContent = 'risk ' + top.score + '/100';
     }
+    $('hero-actions').textContent = state.data.queue.length + ' actions · ' + totalHours() + 'h';
 
-    const searchInput = document.getElementById('vuln-search-input');
-    if (searchInput) {
-        searchInput.addEventListener('input', filterVulnerabilitiesTable);
-    }
-}
-
-function initializePresetButtons() {
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const key = btn.dataset.preset;
-            if (SAMPLE_PRESETS[key]) {
-                const inputArea = document.getElementById('config-input');
-                if (inputArea) {
-                    inputArea.value = JSON.stringify(SAMPLE_PRESETS[key], null, 2);
-                    updateCharCount();
-                    showToast(`Loaded ${btn.textContent} preset`);
-                }
-            }
-        });
-    });
-}
-
-function updateCharCount() {
-    const inputArea = document.getElementById('config-input');
-    const charCount = document.getElementById('char-count');
-    if (inputArea && charCount) {
-        const len = inputArea.value.length;
-        charCount.textContent = `${len.toLocaleString()} characters`;
-    }
-}
-
-function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme');
-    const newTheme = current === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', newTheme);
-    safeStorage.set('theme', newTheme);
-    updateThemeIcon(newTheme);
-    destroyCharts();
-    if (currentData) {
-        renderCharts(currentData.visualization);
-        renderAttackGraph(currentData.visualization.attack_graph);
-        renderVisualizer(currentData.visualization);
-    }
-}
-
-async function loadDummyData() {
-    setStatus('Loading demo data...', 'loading');
-    try {
-        const response = await fetch(`${API_BASE}/generate-dummy`, { method: 'POST' });
-        const data = await response.json();
-        if (data.iam_config) {
-            const inputArea = document.getElementById('config-input');
-            if (inputArea) {
-                inputArea.value = JSON.stringify(data.iam_config, null, 2);
-                updateCharCount();
-            }
-            await analyzeConfig();
-        }
-    } catch (error) {
-        console.error('Failed to load dummy data:', error);
-        setStatus('Failed to load demo data', 'error');
-    }
-}
-
-function clearConfig() {
-    const inputArea = document.getElementById('config-input');
-    if (inputArea) {
-        inputArea.value = '';
-        inputArea.focus();
-        updateCharCount();
-    }
-    currentData = null;
-    currentVulnerability = null;
-    resetUI();
-    setStatus('Ready', 'ready');
-}
-
-async function analyzeConfig() {
-    const inputArea = document.getElementById('config-input');
-    if (!inputArea) return;
-    
-    const configText = inputArea.value.trim();
-    if (!configText) {
-        alert('Please paste an IAM configuration first');
-        return;
-    }
-    
-    let config;
-    try {
-        config = JSON.parse(configText);
-    } catch (e) {
-        alert('Invalid JSON syntax. Please verify your policy format.');
-        return;
-    }
-    
-    setStatus('Analyzing vulnerability vectors...', 'loading');
-    const analyzeBtn = document.getElementById('analyze-btn');
-    if (analyzeBtn) analyzeBtn.disabled = true;
-    
-    try {
-        const response = await fetch(`${API_BASE}/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                iam_config: config,
-                config_type: detectConfigType(config)
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok || data.error) {
-            throw new Error(data.error || `Request failed (HTTP ${response.status})`);
-        }
-        
-        currentData = data;
-        currentVulnerability = null;
-        renderAll(data);
-        setStatus(`Found ${data.summary.total_vulnerabilities} findings`, 'success');
-    } catch (error) {
-        console.error('Analysis failed:', error);
-        setStatus(`Error: ${error.message}`, 'error');
-        alert(`Analysis failed: ${error.message}`);
-    } finally {
-        if (analyzeBtn) analyzeBtn.disabled = false;
-    }
-}
-
-function detectConfigType(config) {
-    if (config.resources && Array.isArray(config.resources)) {
-        return 'terraform';
-    }
-    if (config.Policy || config.policy || config.Statement || config.statement) {
-        return 'json';
-    }
-    return 'generic';
-}
-
-function renderAll(data) {
-    updateSummaryCards(data.summary);
-    renderVulnerabilityTable(data.vulnerabilities);
-    renderAttackGraph(data.visualization.attack_graph);
-    renderVisualizer(data.visualization);
-    renderCharts(data.visualization);
-    switchTab(safeStorage.get('activeTab', 'attack-graph') || 'attack-graph');
-}
-
-function updateSummaryCards(summary) {
-    const setVal = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = val || 0;
-    };
-    setVal('critical-count', summary.critical);
-    setVal('high-count', summary.high);
-    setVal('medium-count', summary.medium);
-    setVal('low-count', summary.low);
-    setVal('total-count', summary.total_vulnerabilities);
-    setVal('ai-count', summary.ai_suggested);
-}
-
-function renderVulnerabilityTable(vulnerabilities) {
-    const tbody = document.querySelector('#vuln-table tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    vulnerabilities.forEach((vuln, idx) => {
-        const tr = document.createElement('tr');
-        tr.style.cursor = 'pointer';
-        tr.dataset.title = (vuln.title || '').toLowerCase();
-        tr.dataset.id = (vuln.id || '').toLowerCase();
-        tr.dataset.resource = (vuln.resource_name || '').toLowerCase();
-        tr.dataset.mitre = (vuln.mitre_techniques || []).join(' ').toLowerCase();
-
-        tr.addEventListener('click', () => showRemediation(vuln, idx));
-        
-        const attackPath = vuln.attack_path ? vuln.attack_path.slice(0, 2).join(' → ') : '-';
-        const mitreTags = vuln.mitre_techniques ? vuln.mitre_techniques.map(t => 
-            `<span class="mitre-tag">${escapeHtml(String(t))}</span>`).join('') : '-';
-        const aiBadge = vuln.detection_source === 'ai' ? '<span class="ai-badge">AI Suggested</span>' : '';
-        const sev = escapeHtml(String(vuln.severity || 'MEDIUM'));
-        const sevClass = safeToken(vuln.severity, 'medium');
-        
-        tr.innerHTML = `
-            <td><code>${escapeHtml(String(vuln.id || ''))}</code></td>
-            <td><strong>${escapeHtml(vuln.title)}</strong>${aiBadge}</td>
-            <td><span class="severity-badge ${sevClass}"><span class="dot"></span>${sev}</span></td>
-            <td><code>${escapeHtml(vuln.resource_name)}</code> <span style="color:var(--fg-muted);font-size:0.72rem;">(${escapeHtml(String(vuln.resource_type || ''))})</span></td>
-            <td>${escapeHtml(attackPath)}${vuln.attack_path && vuln.attack_path.length > 2 ? '...' : ''}</td>
-            <td><div class="mitre-tags">${mitreTags}</div></td>
-            <td><button class="action-btn" type="button">Remediate</button></td>
-        `;
-        // Bound listener instead of an inline onclick referencing a global.
-        const btn = tr.querySelector('.action-btn');
-        if (btn) {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                showRemediation(vuln, idx);
-            });
-        }
-        tbody.appendChild(tr);
-    });
-
-    updateVulnTableCount();
-}
-
-function filterVulnerabilitiesTable() {
-    const searchInput = document.getElementById('vuln-search-input');
-    if (!searchInput) return;
-    const q = searchInput.value.toLowerCase().trim();
-    const rows = document.querySelectorAll('#vuln-table tbody tr');
-
-    let visibleCount = 0;
-    rows.forEach(tr => {
-        const matches = !q || 
-            tr.dataset.title.includes(q) || 
-            tr.dataset.id.includes(q) || 
-            tr.dataset.resource.includes(q) || 
-            tr.dataset.mitre.includes(q);
-        
-        tr.style.display = matches ? '' : 'none';
-        if (matches) visibleCount++;
-    });
-
-    const pill = document.getElementById('vuln-count-pill');
-    if (pill) pill.textContent = `Showing ${visibleCount} of ${rows.length} findings`;
-}
-
-function updateVulnTableCount() {
-    const rows = document.querySelectorAll('#vuln-table tbody tr');
-    const pill = document.getElementById('vuln-count-pill');
-    if (pill) pill.textContent = `Showing ${rows.length} findings`;
-}
-
-function showRemediation(vuln, idx) {
-    currentVulnerability = vuln;
-    const remediation = currentData?.remediations?.[idx]?.remediation;
-    const container = document.getElementById('remediation-content');
-    if (!container) return;
-
-    if (!remediation) {
-        container.innerHTML = '<div class="empty-state-container"><p class="empty-state">No remediation data available for this finding.</p></div>';
-        return;
-    }
-
-    const actionsHtml = (remediation.actions || []).map((action, aIdx) => {
-        const priority = escapeHtml(String(action.priority || 'MEDIUM'));
-        const priorityClass = safeToken(action.priority, 'medium');
-        return `
-        <div class="action-item priority-${priorityClass}">
-            <div class="action-header">
-                <span class="action-name">${escapeHtml(action.action)}</span>
-                <span class="action-priority ${priorityClass}">${priority}</span>
-            </div>
-            <div class="action-description">${escapeHtml(action.description)}</div>
-            <div class="action-code">
-                <button class="btn btn-ghost copy-btn" type="button" data-copy-target="code-action-${aIdx}" style="position:absolute;top:8px;right:8px;padding:4px 8px;font-size:0.7rem;">Copy</button>
-                <pre id="code-action-${aIdx}">${escapeHtml(action.code_example)}</pre>
-            </div>
-            <div class="action-explanation">${escapeHtml(action.explanation)}</div>
-        </div>
-    `;
+    var metrics = [
+      ['Critical', crit, crit ? 'highest urgency' : 'clear', 'var(--n-crit)'],
+      ['High', high, 'compute escalation', 'var(--n-high)'],
+      ['Medium', med, 'managed policies', 'var(--n-med)'],
+      ['Low', low, low ? 'informational' : 'nothing benign', 'var(--n-low)'],
+      ['Identities', state.groups.length, 'policies · roles · users', 'var(--n-acc)'],
+      ['Techniques', state.data.techniques.length, 'MITRE ATT&CK', 'var(--n-mute)']
+    ];
+    $('metrics').innerHTML = metrics.map(function (m) {
+      return '<div class="metric"><div class="metric-label"><i class="metric-bar" style="background:' + m[3] + '"></i>' + esc(m[0]) + '</div>' +
+        '<div class="metric-value">' + esc(m[1]) + '</div><div class="metric-note">' + esc(m[2]) + '</div></div>';
     }).join('');
 
-    const hardenedPolicy = remediation.hardened_policy ? `
-        <div class="hardened-policy">
-            <h4>Hardened IAM Policy Recommendation</h4>
-            <div class="action-code">
-                <button class="btn btn-ghost copy-btn" type="button" data-copy-target="code-hardened" style="position:absolute;top:8px;right:8px;padding:4px 8px;font-size:0.7rem;">Copy Policy</button>
-                <pre id="code-hardened">${escapeHtml(JSON.stringify(remediation.hardened_policy, null, 2))}</pre>
-            </div>
-        </div>
-    ` : '';
-
-    const complianceNotes = remediation.compliance_notes && remediation.compliance_notes.length > 0 ? `
-        <div class="compliance-notes">
-            <h4>Compliance Framework References</h4>
-            <ul>
-                ${remediation.compliance_notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}
-            </ul>
-        </div>
-    ` : '';
-
-    const aiTag = vuln.detection_source === 'ai' ? '<span class="ai-badge">AI Suggested</span>' : '';
-    const vSev = escapeHtml(String(vuln.severity || 'MEDIUM'));
-    const vSevClass = safeToken(vuln.severity, 'medium');
-    const riskScore = Number(remediation.risk_score) || 0;
-
-    container.innerHTML = `
-        <div class="remediation-card">
-            <div class="remediation-header">
-                <div>
-                    <div class="remediation-title">${escapeHtml(vuln.title)}${aiTag}</div>
-                    <div class="remediation-meta">
-                        <span><strong>ID:</strong> <code>${escapeHtml(String(vuln.id || ''))}</code></span>
-                        <span><strong>Resource:</strong> <code>${escapeHtml(vuln.resource_name)}</code> (${escapeHtml(String(vuln.resource_type || ''))})</span>
-                        <span><strong>Severity:</strong> <span class="severity-badge ${vSevClass}">${vSev}</span></span>
-                        <span><strong>Risk Score:</strong> <span style="color:var(--accent-secondary);font-weight:700;">${riskScore}/100</span></span>
-                    </div>
-                </div>
-            </div>
-            <div class="remediation-summary">${escapeHtml(remediation.summary)}</div>
-            <div class="remediation-actions">${actionsHtml}</div>
-            ${hardenedPolicy}
-            ${complianceNotes}
-        </div>
-    `;
-
-    container.querySelectorAll('[data-copy-target]').forEach(btn => {
-        btn.addEventListener('click', () => copyCodeBlock(btn.dataset.copyTarget));
-    });
-
-    switchTab('remediation');
-}
-
-function copyCodeBlock(elementId) {
-    const codeEl = document.getElementById(elementId);
-    if (!codeEl) return;
-    const text = codeEl.textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('Code snippet copied!');
-    }).catch(() => {
-        showToast('Failed to copy code');
-    });
-}
-
-function showToast(msg) {
-    const toast = document.getElementById('toast-notification');
-    if (!toast) return;
-    toast.textContent = msg;
-    toast.classList.add('show');
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 2500);
-}
-
-const GRAPH_SEV_COLORS = { CRITICAL: '#f43f5e', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#10b981' };
-const GRAPH_SEV_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-
-function truncLabel(s, n) {
-    s = String(s || '');
-    return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-function findVulnIndexById(vulnId) {
-    if (!currentData || !currentData.vulnerabilities) return -1;
-    return currentData.vulnerabilities.findIndex(v => v.id === vulnId);
-}
-
-function renderAttackGraph(graphData) {
-    const svgEl = document.getElementById('attack-graph-svg');
-    if (!svgEl) return;
-
-    const svg = d3.select(svgEl);
-    svg.selectAll('*').remove();
-
-    const tooltip = document.getElementById('graph-tooltip');
-    const legendEl = document.getElementById('graph-legend');
-    const countEl = document.getElementById('graph-count');
-    if (tooltip) tooltip.style.opacity = '0';
-
-    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-    const textColor = isLight ? '#0f172a' : '#f1f5f9';
-    const haloColor = isLight ? 'rgba(255,255,255,0.95)' : 'rgba(6,9,19,0.9)';
-    const subColor = isLight ? '#475569' : '#94a3b8';
-
-    const showMitreEl = document.getElementById('show-mitre');
-    const showLabelsEl = document.getElementById('show-attack-paths');
-    const layoutEl = document.getElementById('graph-layout');
-
-    const showMitre = showMitreEl ? showMitreEl.checked : true;
-    const showLabels = showLabelsEl ? showLabelsEl.checked : true;
-    const layout = layoutEl ? layoutEl.value : 'grouped';
-
-    const identities = (graphData.nodes || []).filter(n => n.type === 'identity');
-    const vulns = ((graphData.nodes || []).filter(n => n.type === 'vulnerability'))
-        .sort((a, b) => (GRAPH_SEV_RANK[a.severity] ?? 2) - (GRAPH_SEV_RANK[b.severity] ?? 2));
-
-    if (!vulns.length) {
-        if (countEl) countEl.textContent = 'No findings to display';
-        if (legendEl) legendEl.innerHTML = '';
-        const w = svgEl.clientWidth || 1000;
-        svg.attr('viewBox', `0 0 ${w} 300`);
-        svg.append('text')
-            .attr('x', w / 2).attr('y', 150)
-            .attr('text-anchor', 'middle')
-            .attr('fill', subColor)
-            .attr('font-size', '14px')
-            .text('No vulnerabilities found — load demo data or run an analysis.');
-        window.__graphView = null;
-        return;
-    }
-
-    const mitreMap = new Map();
-    vulns.forEach(v => (v.mitre || []).forEach(t => {
-        if (!mitreMap.has(t)) mitreMap.set(t, { id: `mitre:${t}`, label: t, type: 'mitre', vulns: [] });
-        mitreMap.get(t).vulns.push(v.id);
-    }));
-    const mitres = showMitre ? [...mitreMap.values()].sort((a, b) => b.vulns.length - a.vulns.length).slice(0, 12) : [];
-
-    const groups = new Map();
-    identities.forEach(i => groups.set(i.id, { ident: i, vulns: [] }));
-    vulns.forEach(v => {
-        const key = 'identity:' + (v.resource || 'unknown');
-        if (!groups.has(key)) groups.set(key, { ident: { id: key, label: v.resource || 'unknown', vulnerability_count: 0 }, vulns: [] });
-        groups.get(key).vulns.push(v);
-    });
-    const groupList = [...groups.values()].filter(g => g.vulns.length);
-    groupList.sort((a, b) => b.vulns.length - a.vulns.length);
-
-    const width = svgEl.clientWidth || 1000;
-    const rowH = 36;
-    const height = Math.min(1100, Math.max(480, vulns.length * rowH + 130));
-    const top = 70, bottom = height - 40;
-    svg.attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
-    svg.style('touch-action', 'none');
-
-    const pos = new Map();
-    const ordered = [];
-    groupList.forEach(g => g.vulns.forEach(v => ordered.push(v)));
-    const span = Math.max(1, ordered.length - 1);
-    ordered.forEach((v, i) => {
-        const y = ordered.length === 1 ? (top + bottom) / 2 : top + (bottom - top) * (i / span);
-        pos.set(v.id, { x: 0, y });
-    });
-    const meanY = ids => {
-        const ys = ids.map(id => pos.get(id)).filter(Boolean).map(p => p.y);
-        return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : (top + bottom) / 2;
-    };
-    const spread = (items, gap) => {
-        items.sort((a, b) => a.y - b.y);
-        for (let i = 1; i < items.length; i++) {
-            if (items[i].y - items[i - 1].y < gap) items[i].y = items[i - 1].y + gap;
-        }
-        const over = items.length ? items[items.length - 1].y - bottom : 0;
-        if (over > 0) items.forEach(it => { it.y -= over; });
-    };
-
-    let identPos = groupList.map(g => ({ id: g.ident.id, y: meanY(g.vulns.map(v => v.id)) }));
-    spread(identPos, 64);
-    identPos.forEach(p => pos.set(p.id, { x: 0, y: p.y }));
-
-    let mitrePos = mitres.map(m => ({ id: m.id, y: meanY(m.vulns) }));
-    spread(mitrePos, 44);
-    mitrePos.forEach(p => pos.set(p.id, { x: 0, y: p.y }));
-
-    const hasMitre = mitres.length > 0;
-    const colX = hasMitre
-        ? { ident: width * 0.16, vuln: width * 0.52, mitre: width * 0.86 }
-        : { ident: width * 0.22, vuln: width * 0.68 };
-    pos.forEach(p => { p.x = colX.vuln; });
-    identPos.forEach(p => { pos.get(p.id).x = colX.ident; });
-    mitrePos.forEach(p => { pos.get(p.id).x = colX.mitre; });
-
-    const radial = layout === 'radial';
-    if (radial) {
-        const cx = width / 2, cy = height / 2;
-        const r1 = Math.min(width, height) * 0.18, r2 = Math.min(width, height) * 0.38;
-        groupList.forEach((g, i) => {
-            const a = (i / Math.max(1, groupList.length)) * Math.PI * 2 - Math.PI / 2;
-            pos.get(g.ident.id).x = cx + Math.cos(a) * r1;
-            pos.get(g.ident.id).y = cy + Math.sin(a) * r1;
-            g.vulns.forEach((v, j) => {
-                const spreadA = 0.5;
-                const va = a + (g.vulns.length === 1 ? 0 : (j / (g.vulns.length - 1) - 0.5) * spreadA);
-                pos.get(v.id).x = cx + Math.cos(va) * r2;
-                pos.get(v.id).y = cy + Math.sin(va) * r2;
-            });
-        });
-        mitres.forEach((m, i) => {
-            const a = (i / Math.max(1, mitres.length)) * Math.PI * 2;
-            const p = pos.get(m.id);
-            p.x = cx + Math.cos(a) * (r2 + 90);
-            p.y = cy + Math.sin(a) * (r2 + 90);
-        });
-    }
-
-    const defs = svg.append('defs');
-    const arrow = defs.append('marker')
-        .attr('id', 'graph-arrow')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 9).attr('refY', 0)
-        .attr('markerWidth', 7).attr('markerHeight', 7)
-        .attr('orient', 'auto');
-    arrow.append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', isLight ? '#94a3b8' : '#64748b');
-
-    const g = svg.append('g');
-
-    const edgePath = (a, b) => {
-        if (radial) return `M${a.x},${a.y} L${b.x},${b.y}`;
-        const mx = (a.x + b.x) / 2;
-        return `M${a.x},${a.y} C${mx},${a.y} ${mx},${b.y} ${b.x},${b.y}`;
-    };
-
-    const edgeData = [];
-    groupList.forEach(gr => gr.vulns.forEach(v => {
-        edgeData.push({ s: pos.get(gr.ident.id), t: pos.get(v.id), sev: v.severity, kind: 'vuln' });
-    }));
-    mitres.forEach(m => m.vulns.forEach(vid => {
-        if (pos.has(vid)) edgeData.push({ s: pos.get(vid), t: pos.get(m.id), sev: null, kind: 'mitre' });
-    }));
-
-    g.append('g').selectAll('path').data(edgeData).join('path')
-        .attr('d', d => edgePath(d.s, d.t))
-        .attr('fill', 'none')
-        .attr('stroke', d => d.kind === 'mitre' ? (isLight ? '#cbd5e1' : '#334155') : (GRAPH_SEV_COLORS[d.sev] || '#64748b'))
-        .attr('stroke-opacity', d => d.kind === 'mitre' ? 0.6 : 0.65)
-        .attr('stroke-width', 1.8)
-        .attr('stroke-dasharray', d => d.kind === 'mitre' ? '5,4' : 'none')
-        .attr('marker-end', 'url(#graph-arrow)');
-
-    const showTip = (html, evt) => {
-        if (!tooltip) return;
-        const wrap = svgEl.parentElement.getBoundingClientRect();
-        tooltip.innerHTML = html;
-        tooltip.style.opacity = '1';
-        tooltip.style.left = Math.min(wrap.width - 270, Math.max(8, evt.clientX - wrap.left + 14)) + 'px';
-        tooltip.style.top = Math.max(8, evt.clientY - wrap.top - 10) + 'px';
-    };
-    const hideTip = () => { if (tooltip) tooltip.style.opacity = '0'; };
-
-    const identG = g.append('g').selectAll('g').data(groupList).join('g')
-        .attr('class', 'gnode')
-        .attr('transform', d => `translate(${pos.get(d.ident.id).x},${pos.get(d.ident.id).y})`)
-        .style('cursor', 'default');
-    identG.append('rect')
-        .attr('x', -54).attr('y', -22).attr('width', 108).attr('height', 44).attr('rx', 12)
-        .attr('fill', isLight ? '#eef2ff' : '#141d33')
-        .attr('stroke', '#6366f1').attr('stroke-width', 1.5);
-    identG.append('text')
-        .attr('y', 1).attr('text-anchor', 'middle')
-        .attr('font-size', '11px').attr('font-weight', '700').attr('font-family', 'Plus Jakarta Sans, sans-serif')
-        .attr('fill', textColor)
-        .text(d => truncLabel(d.ident.label, 15));
-    identG.append('text')
-        .attr('y', 14).attr('text-anchor', 'middle')
-        .attr('font-size', '9px').attr('font-family', 'Inter, sans-serif')
-        .attr('fill', subColor)
-        .text(d => `${d.vulns.length} finding${d.vulns.length === 1 ? '' : 's'}`);
-    identG.on('mousemove', (evt, d) => showTip(
-        `<div class="gt-title">${escapeHtml(d.ident.label)}</div>` +
-        `<div class="gt-row">${d.vulns.length} finding${d.vulns.length === 1 ? '' : 's'}</div>`, evt))
-        .on('mouseleave', hideTip);
-
-    const vulnR = sev => sev === 'CRITICAL' ? 12 : sev === 'HIGH' ? 10 : sev === 'MEDIUM' ? 9 : 8;
-    const vulnG = g.append('g').selectAll('g').data(vulns).join('g')
-        .attr('class', 'gnode vuln')
-        .attr('transform', d => `translate(${pos.get(d.id).x},${pos.get(d.id).y})`)
-        .style('cursor', 'pointer');
-    vulnG.append('circle')
-        .attr('r', d => vulnR(d.severity))
-        .attr('fill', d => GRAPH_SEV_COLORS[d.severity] || '#64748b')
-        .attr('fill-opacity', 0.95)
-        .attr('stroke', isLight ? '#ffffff' : 'rgba(255,255,255,0.9)')
-        .attr('stroke-width', 1.5);
-    vulnG.append('circle')
-        .attr('r', d => vulnR(d.severity) + 5)
-        .attr('fill', 'none')
-        .attr('stroke', d => d.detection_source === 'ai' ? '#a855f7' : (GRAPH_SEV_COLORS[d.severity] || '#64748b'))
-        .attr('stroke-opacity', d => d.detection_source === 'ai' ? 0.85 : 0.3)
-        .attr('stroke-width', d => d.detection_source === 'ai' ? 2 : 2)
-        .attr('stroke-dasharray', d => d.detection_source === 'ai' ? '4,3' : 'none');
-    vulnG.filter(d => d.detection_source === 'ai').append('text')
-        .attr('y', d => -vulnR(d.severity) - 12)
-        .attr('text-anchor', 'middle')
-        .attr('font-size', '9px').attr('font-weight', '800').attr('font-family', 'Plus Jakarta Sans, sans-serif')
-        .attr('letter-spacing', '1px')
-        .attr('fill', '#a855f7')
-        .attr('stroke', haloColor).attr('stroke-width', 3).attr('paint-order', 'stroke')
-        .text('AI');
-    if (showLabels) {
-        vulnG.append('text')
-            .attr('x', 18).attr('y', 4)
-            .attr('font-size', '11px').attr('font-weight', '600').attr('font-family', 'Plus Jakarta Sans, sans-serif')
-            .attr('fill', textColor)
-            .attr('stroke', haloColor).attr('stroke-width', 3).attr('paint-order', 'stroke')
-            .text(d => truncLabel(d.full_title || d.label, 32));
-    }
-    vulnG
-        .on('mousemove', (evt, d) => showTip(
-            `<div class="gt-title">${escapeHtml(d.full_title || d.label)}${d.detection_source === 'ai' ? ' <span class="ai-badge">AI</span>' : ''}</div>` +
-            `<div class="gt-row"><span class="severity-badge ${safeToken(d.severity, 'medium')}">${escapeHtml(String(d.severity || ''))}</span>` +
-            `<span class="gt-mut">${escapeHtml(d.resource || '')}</span></div>` +
-            (d.details ? `<div class="gt-desc">${escapeHtml(String(d.details).slice(0, 160))}${String(d.details).length > 160 ? '…' : ''}</div>` : '') +
-            `<div class="gt-hint">Click to view remediation →</div>`, evt))
-        .on('mouseleave', hideTip)
-        .on('click', (evt, d) => {
-            evt.stopPropagation();
-            const vid = String(d.id).replace(/^vuln:/, '');
-            const idx = findVulnIndexById(vid);
-            if (idx >= 0 && currentData.vulnerabilities[idx]) showRemediation(currentData.vulnerabilities[idx], idx);
-        });
-
-    if (hasMitre) {
-        const mitreG = g.append('g').selectAll('g').data(mitres).join('g')
-            .attr('class', 'gnode')
-            .attr('transform', d => `translate(${pos.get(d.id).x},${pos.get(d.id).y})`)
-            .style('cursor', 'default');
-        mitreG.append('rect')
-            .attr('x', -9).attr('y', -9).attr('width', 18).attr('height', 18).attr('rx', 4)
-            .attr('transform', 'rotate(45)')
-            .attr('fill', isLight ? '#e0f2fe' : '#0c2a3f')
-            .attr('stroke', '#06b6d4').attr('stroke-width', 1.5);
-        if (showLabels) {
-            mitreG.append('text')
-                .attr('x', 18).attr('y', 4)
-                .attr('font-size', '10px').attr('font-family', '"JetBrains Mono", monospace')
-                .attr('fill', textColor)
-                .attr('stroke', haloColor).attr('stroke-width', 3).attr('paint-order', 'stroke')
-                .text(d => d.label);
-        }
-        mitreG
-            .on('mousemove', (evt, d) => showTip(
-                `<div class="gt-title" style="font-family:monospace">${escapeHtml(d.label)}</div>` +
-                `<div class="gt-row">${d.vulns.length} linked finding${d.vulns.length === 1 ? '' : 's'}</div>`, evt))
-            .on('mouseleave', hideTip);
-    }
-
-    const headers = hasMitre
-        ? [{ x: colX.ident, t: 'Identities' }, { x: colX.vuln, t: 'Findings' }, { x: colX.mitre, t: 'MITRE ATT&CK' }]
-        : [{ x: colX.ident, t: 'Identities' }, { x: colX.vuln, t: 'Findings' }];
-    if (!radial) {
-        g.append('g').selectAll('text').data(headers).join('text')
-            .attr('x', d => d.x).attr('y', 26)
-            .attr('text-anchor', 'middle')
-            .attr('font-size', '10px').attr('font-weight', '800').attr('font-family', 'Plus Jakarta Sans, sans-serif')
-            .attr('letter-spacing', '1.5px')
-            .attr('fill', subColor)
-            .text(d => d.t.toUpperCase());
-    }
-
-    if (legendEl) {
-        const aiCount = vulns.filter(v => v.detection_source === 'ai').length;
-        legendEl.innerHTML =
-            `<span class="lg-item"><span class="lg-swatch lg-ident"></span>Identity</span>` +
-            Object.keys(GRAPH_SEV_COLORS).map(s =>
-                `<span class="lg-item"><span class="lg-dot" style="background:${GRAPH_SEV_COLORS[s]}"></span>${s.charAt(0) + s.slice(1).toLowerCase()}</span>`
-            ).join('') +
-            (hasMitre ? `<span class="lg-item"><span class="lg-diamond"></span>MITRE technique</span>` : '') +
-            (aiCount > 0 ? `<span class="lg-item"><span class="lg-dot lg-ai"></span>AI suggested</span>` : '') +
-            `<span class="lg-hint">Scroll to zoom · drag canvas to pan · click finding for remediation</span>`;
-    }
-    const aiTotal = vulns.filter(v => v.detection_source === 'ai').length;
-    if (countEl) countEl.textContent = `${groupList.length} identities · ${vulns.length} findings${aiTotal ? ` · ${aiTotal} AI` : ''}${hasMitre ? ` · ${mitres.length} techniques` : ''}`;
-
-    const zoom = d3.zoom().scaleExtent([0.4, 2.5]).on('zoom', e => g.attr('transform', e.transform));
-    svg.call(zoom);
-    window.__graphView = { zoom, svg };
-}
-
-function renderVisualizer(vizData) {
-    renderEscalationChains(vizData.privilege_escalation_chains);
-    renderMitreHeatmap(vizData.mitre_heatmap);
-    renderResourceRiskMap(vizData.resource_risk_map);
-    renderRemediationTimeline(vizData.remediation_timeline);
-}
-
-function renderEscalationChains(chains) {
-    const container = document.getElementById('escalation-chains');
-    if (!container) return;
-
-    if (!chains || chains.length === 0) {
-        container.innerHTML = '<p class="empty-state">No escalation chains detected</p>';
-        return;
-    }
-    
-    container.innerHTML = chains.map(chain => `
-        <div class="chain-item">
-            <div class="chain-header">
-                <span class="chain-identity">${escapeHtml(chain.identity)}</span>
-                <span class="chain-length">${Number(chain.length) || 0} vulns</span>
-            </div>
-            <div class="chain-steps">
-                ${chain.steps.map(step => `
-                    <div class="chain-step">
-                        <div class="chain-step-severity" style="background: ${getSeverityColor(step.severity)}"></div>
-                        <span class="chain-step-action">${escapeHtml(step.action)}</span>
-                        <span class="chain-step-mitre">${escapeHtml((step.mitre || []).join(', '))}</span>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-    `).join('');
-}
-
-function renderMitreHeatmap(heatmapData) {
-    const container = document.getElementById('mitre-heatmap');
-    if (!container) return;
-
-    const techniques = heatmapData?.techniques || [];
-    if (techniques.length === 0) {
-        container.innerHTML = '<p class="empty-state">No MITRE techniques detected</p>';
-        return;
-    }
-
-    const maxCount = Math.max(...techniques.map(t => Number(t.count) || 0), 1);
-
-    const severityClass = (sev) => {
-        if (sev === 'HIGH') return 'hm-high';
-        if (sev === 'MEDIUM') return 'hm-medium';
-        return 'hm-low';
-    };
-
-    container.innerHTML = techniques.map(tech => {
-        const pct = Math.max(0, Math.min(100, Math.round(((Number(tech.count) || 0) / maxCount) * 100)));
-        return `
-            <div class="hm-row">
-                <div class="hm-top">
-                    <span class="hm-id">${escapeHtml(tech.id)}</span>
-                    <span class="hm-count">${Number(tech.count) || 0}</span>
-                </div>
-                <div class="hm-bar-track">
-                    <div class="hm-bar ${severityClass(tech.severity)}" style="width: ${pct}%"></div>
-                </div>
-                <div class="hm-bottom">
-                    <span class="hm-name">${escapeHtml(tech.name)}</span>
-                    <span class="hm-tactic">${escapeHtml(tech.tactic)}</span>
-                </div>
-            </div>
-        `;
+    $('risk-list').innerHTML = state.data.risks.map(function (r) {
+      var pc = function (n) { return (n / Math.max(1, r.total) * 100) + '%'; };
+      return '<div class="risk-row"><span class="risk-name" title="' + esc(r.name) + '">' + esc(r.name) + '</span>' +
+        '<span class="risk-track">' +
+        '<i style="width:' + pc(r.critical) + ';background:var(--n-crit)"></i>' +
+        '<i style="width:' + pc(r.high) + ';background:var(--n-high)"></i>' +
+        '<i style="width:' + pc(r.medium) + ';background:var(--n-med)"></i>' +
+        '<i style="width:' + pc(r.low) + ';background:var(--n-low)"></i>' +
+        '</span><span class="risk-score">' + esc(r.score) + '/100</span></div>';
     }).join('');
-}
 
-function renderResourceRiskMap(riskData) {
-    const container = document.getElementById('resource-risk-map');
-    if (!container) return;
+    $('top-findings').innerHTML = state.data.findings.filter(function (f) { return f.severity === 'CRITICAL'; }).slice(0, 6).map(function (f) {
+      return '<button class="list-row" data-select="' + esc(f.id) + '" data-goto="remediation"><i class="dot" style="background:' + SEV_VAR[f.severity] + '"></i>' +
+        '<span class="title">' + esc(f.title) + '</span><span class="meta">' + esc(f.resource) + '</span></button>';
+    }).join('');
+  }
 
-    const resources = riskData?.resources || [];
-    if (resources.length === 0) {
-        container.innerHTML = '<p class="empty-state">No resource risk data</p>';
-        return;
-    }
-    
-    const pctWidth = (part, total) => {
-        const value = (Number(part) / Number(total)) * 100;
-        return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-    };
+  function renderInspector() {
+    var f = findingById(state.selId);
+    if (!f) return;
+    $('inspector').innerHTML =
+      '<div class="eyebrow">Selected node</div>' +
+      '<div class="head">' + esc(f.title) + '</div>' +
+      '<div class="tag-row"><span class="tag" style="border-color:' + SEV_VAR[f.severity] + ';color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span>' +
+      '<span class="tag">' + esc(f.id) + '</span>' +
+      (f.detection_source === 'ai' ? '<span class="tag">AI suggested</span>' : '') + '</div>' +
+      '<div class="body">' + esc(f.description) + '</div>' +
+      '<dl class="facts"><dt>Resource</dt><dd class="mono">' + esc(f.resource) + (f.resource_type ? ' (' + esc(f.resource_type) + ')' : '') + '</dd>' +
+      '<dt style="margin-top:6px">Attack path</dt><dd>' + esc(f.attack_path) + '</dd></dl>' +
+      '<button class="btn" data-goto="remediation" style="margin-top:4px;border-color:var(--n-acc)">Open remediation</button>';
+  }
 
-    container.innerHTML = resources.map(r => `
-        <div class="risk-bar">
-            <span class="risk-bar-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
-            <div class="risk-bar-track">
-                <div class="risk-bar-fill critical" style="width: ${pctWidth(r.critical, r.total)}%"></div>
-                <div class="risk-bar-fill high" style="width: ${pctWidth(r.high, r.total)}%"></div>
-                <div class="risk-bar-fill medium" style="width: ${pctWidth(r.medium, r.total)}%"></div>
-                <div class="risk-bar-fill low" style="width: ${pctWidth(r.low, r.total)}%"></div>
-            </div>
-            <span class="risk-bar-score">${Number(r.risk_score) || 0}/100</span>
-        </div>
-    `).join('');
-}
-
-function renderRemediationTimeline(timelineData) {
-    const container = document.getElementById('remediation-timeline');
-    if (!container) return;
-
-    const items = timelineData?.items || [];
-    if (items.length === 0) {
-        container.innerHTML = '<p class="empty-state">No remediation actions</p>';
-        return;
-    }
-    
-    container.innerHTML = items.map(item => `
-        <div class="timeline-item">
-            <div class="timeline-priority ${safeToken(item.priority, 'medium')}"></div>
-            <span class="timeline-action">${escapeHtml(item.action)}</span>
-            <span class="timeline-hours">${Number(item.estimated_hours) || 0}h</span>
-        </div>
-    `).join('');
-}
-
-function renderCharts(vizData) {
-    if (!vizData) return;
-    if (vizData.severity_distribution) renderSeverityChart(vizData.severity_distribution);
-    if (vizData.resource_risk_map) renderRadarChart(vizData.resource_risk_map);
-    renderPriorityChart(vizData.remediation_timeline);
-}
-
-function renderSeverityChart(dist) {
-    const canvas = document.getElementById('severity-chart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    destroyChart('severity');
-    
-    charts.severity = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: dist.labels,
-            datasets: [{
-                data: dist.data,
-                backgroundColor: dist.colors,
-                borderWidth: 0,
-                cutout: '68%'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--fg-secondary').trim(), padding: 16, font: { size: 12, family: 'Plus Jakarta Sans' } }
-                }
-            }
-        }
-    });
-}
-
-function renderRadarChart(riskData) {
-    const canvas = document.getElementById('radar-chart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    destroyChart('radar');
-    
-    const resources = (riskData.resources || []).slice(0, 8);
-    const data = {
-        labels: resources.map(r => r.name.length > 15 ? r.name.slice(0,15)+'…' : r.name),
-        datasets: [{
-            label: 'Risk Score',
-            data: resources.map(r => r.risk_score),
-            backgroundColor: 'rgba(99, 102, 241, 0.25)',
-            borderColor: '#6366f1',
-            pointBackgroundColor: '#06b6d4',
-            borderWidth: 2
-        }]
-    };
-    
-    charts.radar = new Chart(ctx, {
-        type: 'radar',
-        data: data,
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    beginAtZero: true,
-                    max: 100,
-                    grid: { color: 'rgba(255,255,255,0.08)' },
-                    angleLines: { color: 'rgba(255,255,255,0.08)' },
-                    pointLabels: { color: '#94a3b8', font: { size: 10, family: 'JetBrains Mono' } },
-                    ticks: { display: false }
-                }
-            },
-            plugins: { legend: { display: false } }
-        }
-    });
-}
-
-function renderPriorityChart(timelineData) {
-    const canvas = document.getElementById('progress-chart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    destroyChart('progress');
-
-    // Real data: remediation actions grouped by priority.
-    const byPriority = timelineData?.by_priority || {};
-    const order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-    const labels = order.filter(p => byPriority[p]);
-    const data = labels.map(p => byPriority[p]);
-    const colorMap = { CRITICAL: '#f43f5e', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#10b981' };
-
-    if (!labels.length) return;
-
-    charts.progress = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: labels.map(p => p.charAt(0) + p.slice(1).toLowerCase()),
-            datasets: [{
-                data: data,
-                backgroundColor: labels.map(p => colorMap[p]),
-                borderWidth: 0,
-                cutout: '70%'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16, font: { size: 12, family: 'Plus Jakarta Sans' } } }
-            }
-        }
-    });
-}
-
-function destroyChart(name) {
-    if (charts[name]) {
-        charts[name].destroy();
-        charts[name] = null;
-    }
-}
-
-function destroyCharts() {
-    Object.keys(charts).forEach(destroyChart);
-}
-
-function switchTab(tabName) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tabName);
-    });
-    document.querySelectorAll('.tab-panel').forEach(panel => {
-        panel.classList.toggle('active', panel.id === tabName);
+  function renderFindings() {
+    var q = state.query.trim().toLowerCase();
+    var rows = state.data.findings.filter(function (f) {
+      if (state.sev !== 'ALL' && f.severity !== state.sev) return false;
+      if (!q) return true;
+      return (f.title + ' ' + f.id + ' ' + f.resource + ' ' + f.mitre.join(' ')).toLowerCase().indexOf(q) >= 0;
     });
 
-    safeStorage.set('activeTab', tabName);
+    $('sev-filters').innerHTML = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (k) {
+      var label = k === 'ALL' ? 'All' : k.charAt(0) + k.slice(1).toLowerCase();
+      return '<button class="chip" data-sev="' + k + '" aria-pressed="' + (state.sev === k) + '">' + label + '</button>';
+    }).join('');
 
-    if (tabName === 'visualizer' && currentData?.visualization) {
-        requestAnimationFrame(() => {
-            renderMitreHeatmap(currentData.visualization.mitre_heatmap);
-        });
+    $('shown-count').textContent = rows.length + ' of ' + state.data.findings.length;
+
+    $('findings-body').innerHTML = rows.map(function (f) {
+      return '<tr data-select="' + esc(f.id) + '" data-goto="remediation">' +
+        '<td class="id">' + esc(f.id) + '</td>' +
+        '<td>' + esc(f.title) + (f.detection_source === 'ai' ? ' <span class="tag">AI</span>' : '') + '</td>' +
+        '<td><span class="sev" style="color:' + SEV_VAR[f.severity] + '"><i class="dot" style="background:' + SEV_VAR[f.severity] + '"></i>' + esc(f.severity) + '</span></td>' +
+        '<td class="mono">' + esc(f.resource) + '</td>' +
+        '<td><span class="mitre-tags">' + f.mitre.map(function (m) { return '<span class="tag">' + esc(m) + '</span>'; }).join('') + '</span></td>' +
+        '<td style="text-align:right"><button class="btn btn-sm">Remediate</button></td></tr>';
+    }).join('') || '<tr><td colspan="6" style="color:var(--n-mute)">No findings match that filter.</td></tr>';
+  }
+
+  function renderRemediation() {
+    var f = findingById(state.selId);
+    if (!f) return;
+    var real = state.data.remediations[f.id];
+
+    /* Prefer the backend's own remediation for this finding; the local
+       strategy table is only used in the offline preview. */
+    var actions, hardened, compliance, score, summary;
+    if (real) {
+      actions = (real.actions || []).map(function (a) {
+        return {
+          name: a.action || '', priority: String(a.priority || 'MEDIUM').toUpperCase(),
+          description: a.description || '',
+          code: typeof a.code_example === 'string' ? a.code_example : JSON.stringify(a.code_example, null, 2),
+          explanation: a.explanation || ''
+        };
+      });
+      hardened = real.hardened_policy || {};
+      compliance = real.compliance_notes || [];
+      score = real.risk_score;
+      summary = real.summary || '';
+    } else {
+      var strategy = strategyFor(f);
+      actions = (STRATEGY_ACTIONS[strategy] || STRATEGY_ACTIONS.attach_policy).map(function (a) {
+        return { name: a.name, priority: a.priority, description: a.description, code: JSON.stringify(a.code, null, 2), explanation: a.explanation };
+      });
+      hardened = strategy === 'managed_policy_review'
+        ? { attached_policy_arn: 'scoped-replacement-required' }
+        : { Version: '2012-10-17', Statement: [{
+            Effect: 'Allow',
+            Action: strategy === 'access_key' ? ['iam:CreateAccessKey'] : strategy === 'pass_role' ? ['iam:PassRole'] : ['iam:CreateAccessKey', 'iam:PassRole'],
+            Resource: strategy === 'access_key' ? ['arn:aws:iam::123456789012:user/${aws:username}'] : ['arn:aws:iam::123456789012:role/AppSpecificRole'],
+            Condition: { StringEquals: { 'aws:RequestedRegion': 'us-east-1' } }
+          }] };
+      compliance = ['CIS AWS Foundations Benchmark', 'NIST 800-53 Access Control Family'];
+      score = RISK_BY_SEV[f.severity];
+      summary = 'Vulnerability in ' + f.resource + ': ' + f.title + '.';
     }
-}
 
-function setStatus(message, type) {
-    const indicator = document.getElementById('status-indicator');
-    if (!indicator) return;
-    const dot = indicator.querySelector('.dot');
-    const text = indicator.querySelector('span:last-child');
-    
-    if (text) text.textContent = message;
-    
-    if (dot) {
-        dot.className = 'dot';
-        if (type === 'loading') {
-            dot.style.background = '#06b6d4';
-            dot.style.animation = 'pulseGlow 1s infinite';
-        } else if (type === 'success') {
-            dot.style.background = '#10b981';
-            dot.style.animation = 'pulseGlow 2s infinite';
-        } else if (type === 'error') {
-            dot.style.background = '#f43f5e';
-            dot.style.animation = 'none';
-        } else {
-            dot.style.background = '#10b981';
-            dot.style.animation = 'pulseGlow 2s infinite';
-        }
+    $('rem-header').innerHTML =
+      '<div class="row"><div style="flex:1;min-width:220px">' +
+      '<div class="title">' + esc(f.title) + '</div>' +
+      '<div class="facts"><span>' + esc(f.id) + '</span><span>' + esc(f.resource) + '</span><span style="color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span>' +
+      (real ? '<span>' + esc(real.source === 'ai' ? 'AI remediation' : 'rule engine') + '</span>' : '') + '</div>' +
+      '</div><div style="text-align:right"><div class="score">' + esc(score) + '/100</div><div class="score-label">risk score</div></div></div>' +
+      '<div class="rem-summary">' + esc(summary) + '</div>';
+
+    $('rem-actions').innerHTML = actions.map(function (a) {
+      var color = a.priority === 'CRITICAL' ? 'var(--n-crit)' : a.priority === 'HIGH' ? 'var(--n-high)' : 'var(--n-med)';
+      return '<div class="panel"><div class="panel-head"><span class="panel-title" style="flex:1 1 auto">' + esc(a.name) + '</span>' +
+        '<span class="tag" style="border-color:' + color + ';color:' + color + '">' + esc(a.priority) + '</span></div>' +
+        '<div class="panel-body"><div style="font-size:12.5px;color:var(--n-mute);line-height:1.6">' + esc(a.description) + '</div>' +
+        '<div class="code"><pre>' + esc(a.code) + '</pre></div>' +
+        '<div class="explain">' + esc(a.explanation) + '</div></div></div>';
+    }).join('') || '<div class="panel"><div class="panel-body" style="color:var(--n-mute)">No remediation actions returned for this finding.</div></div>';
+
+    $('hardened-policy').textContent = JSON.stringify(hardened, null, 2);
+    $('compliance').innerHTML = compliance.map(function (c) { return '<div><span class="ok">✓</span><span>' + esc(c) + '</span></div>'; }).join('');
+    $('queue-mini').innerHTML = queueHtml(5);
+  }
+
+  function queueHtml(limit) {
+    return state.data.queue.slice(0, limit || 99).map(function (q) {
+      var color = q[1] === 'CRITICAL' ? 'var(--n-crit)' : q[1] === 'HIGH' ? 'var(--n-high)' : 'var(--n-med)';
+      return '<div class="queue-row"><i class="dot" style="background:' + color + '"></i>' +
+        '<span class="action" title="' + esc(q[0]) + '">' + esc(q[0]) + '</span><span class="hours">' + esc(q[2]) + 'h</span></div>';
+    }).join('');
+  }
+
+  function renderVisualizer() {
+    var chains = state.groups.slice(0, 3).map(function (g) {
+      var items = g.ids.map(findingById).slice().sort(function (a, b) { return SEV_ORDER[a.severity] - SEV_ORDER[b.severity]; });
+      return { identity: g.name, steps: items };
+    });
+    $('chain-count').textContent = chains.length + ' identities';
+    $('chains').innerHTML = chains.map(function (c) {
+      return '<div class="chain"><div class="chain-head"><span>' + esc(c.identity) + '</span><span style="color:var(--n-mute);font-size:10px">' + c.steps.length + ' steps</span></div>' +
+        '<div class="chain-steps">' + c.steps.map(function (s) {
+          return '<div class="chain-step"><i class="dot" style="background:' + SEV_VAR[s.severity] + '"></i>' +
+            '<span class="action">' + esc(s.title) + '</span><span class="tech">' + esc(s.mitre.join(', ')) + '</span></div>';
+        }).join('') + '</div></div>';
+    }).join('');
+
+    $('tech-count').textContent = state.data.techniques.length + ' techniques';
+    var max = Math.max.apply(null, state.data.techniques.map(function (t) { return t.count; }).concat([1]));
+    $('heatmap').innerHTML = state.data.techniques.map(function (t) {
+      var color = t.count >= max * 0.8 ? 'var(--n-crit)' : t.count >= max * 0.34 ? 'var(--n-high)' : 'var(--n-med)';
+      return '<div class="tech"><div class="tech-row"><span class="tech-id">' + esc(t.id) + '</span>' +
+        '<span class="tech-name">' + esc(t.name) + '</span><span class="tech-count">' + esc(t.count) + '</span></div>' +
+        '<div class="bar"><div style="width:' + Math.round(t.count / max * 100) + '%;background:' + color + '"></div></div>' +
+        '<span class="tactic">' + esc(t.tactic) + '</span></div>';
+    }).join('');
+
+    $('queue-total').textContent = totalHours() + 'h total';
+    $('queue-full').innerHTML = queueHtml();
+  }
+
+  function donut(items, total) {
+    var R = 74, C = 2 * Math.PI * R, off = 0;
+    var arcs = items.filter(function (i) { return i.value > 0; }).map(function (i) {
+      var len = i.value / total * C;
+      var s = '<circle cx="95" cy="95" r="' + R + '" fill="none" stroke="' + i.color + '" stroke-width="16" ' +
+        'stroke-dasharray="' + (len - 2) + ' ' + (C - len + 2) + '" stroke-dashoffset="' + (-off) + '" transform="rotate(-90 95 95)"/>';
+      off += len;
+      return s;
+    }).join('');
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:14px">' +
+      '<svg width="190" height="190" viewBox="0 0 190 190">' + arcs +
+      '<text x="95" y="92" text-anchor="middle" font-size="26" font-family="Inter,sans-serif" font-weight="300" fill="currentColor">' + total + '</text>' +
+      '<text x="95" y="110" text-anchor="middle" font-size="9" letter-spacing="2" font-family="JetBrains Mono,monospace" fill="currentColor" opacity="0.55">TOTAL</text></svg>' +
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">' +
+      items.map(function (i) {
+        return '<span style="display:flex;align-items:center;gap:6px;font-size:11px;font-family:var(--mono);opacity:.75">' +
+          '<i style="width:8px;height:8px;border-radius:2px;background:' + i.color + '"></i>' + esc(i.label) + ' ' + i.value + '</span>';
+      }).join('') + '</div></div>';
+  }
+
+  function radar() {
+    var cx = 110, cy = 105, R = 78, rs = state.data.risks.slice(0, 6);
+    var pts = rs.map(function (r, i) {
+      var a = i / rs.length * Math.PI * 2 - Math.PI / 2, rr = r.score / 100 * R;
+      return { x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr, ax: cx + Math.cos(a) * R, ay: cy + Math.sin(a) * R,
+        lx: cx + Math.cos(a) * (R + 20), ly: cy + Math.sin(a) * (R + 20) + 3,
+        name: r.name.length > 13 ? r.name.slice(0, 12) + '…' : r.name };
+    });
+    return '<svg width="240" height="215" viewBox="0 0 240 215" style="color:currentColor">' +
+      '<g opacity="0.25">' + [0.33, 0.66, 1].map(function (f) { return '<circle cx="' + cx + '" cy="' + cy + '" r="' + R * f + '" fill="none" stroke="currentColor"/>'; }).join('') + '</g>' +
+      '<g opacity="0.2">' + pts.map(function (p) { return '<line x1="' + cx + '" y1="' + cy + '" x2="' + p.ax + '" y2="' + p.ay + '" stroke="currentColor"/>'; }).join('') + '</g>' +
+      '<polygon points="' + pts.map(function (p) { return p.x + ',' + p.y; }).join(' ') + '" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.4"/>' +
+      pts.map(function (p) { return '<circle cx="' + p.x + '" cy="' + p.y + '" r="2.6" fill="currentColor"/>'; }).join('') +
+      pts.map(function (p) { return '<text x="' + p.lx + '" y="' + p.ly + '" text-anchor="middle" font-size="8.5" font-family="JetBrains Mono,monospace" fill="currentColor" opacity="0.6">' + esc(p.name) + '</text>'; }).join('') +
+      '</svg>';
+  }
+
+  function renderCharts() {
+    var dark = state.theme === 'dark';
+    var c = dark ? { CRITICAL: '#d2686f', HIGH: '#cc8b4e', MEDIUM: '#bca85a', LOW: '#7fa189' } : { CRITICAL: '#a8434b', HIGH: '#91602c', MEDIUM: '#7d6c22', LOW: '#4a6b55' };
+
+    $('chart-sev-meta').textContent = state.data.findings.length + ' findings';
+    $('chart-severity').innerHTML = donut([
+      { label: 'Critical', value: countBy('CRITICAL'), color: c.CRITICAL },
+      { label: 'High', value: countBy('HIGH'), color: c.HIGH },
+      { label: 'Medium', value: countBy('MEDIUM'), color: c.MEDIUM },
+      { label: 'Low', value: countBy('LOW'), color: c.LOW }
+    ], state.data.findings.length);
+
+    $('chart-radar').innerHTML = radar();
+
+    /* Count actions per priority — the card is "Actions by priority", so this
+       must be a count, not a sum of hours. */
+    var byPriority = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    state.data.queue.forEach(function (q) { byPriority[q[1]] = (byPriority[q[1]] || 0) + 1; });
+    $('chart-pri-meta').textContent = state.data.queue.length + ' actions';
+    $('chart-priority').innerHTML = donut([
+      { label: 'Critical', value: byPriority.CRITICAL, color: c.CRITICAL },
+      { label: 'High', value: byPriority.HIGH, color: c.HIGH },
+      { label: 'Medium', value: byPriority.MEDIUM, color: c.MEDIUM },
+      { label: 'Low', value: byPriority.LOW, color: c.LOW }
+    ], state.data.queue.length || 1);
+  }
+
+  /* ---------------- 3D lifecycle ---------------- */
+
+  function mountHero() {
+    if (hero || state.view !== 'overview') return;
+    hero = window.WinnowScenes.createHero($('hero-canvas'), { theme: state.theme });
+  }
+  function mountGraph() {
+    if (graph || state.view !== 'graph') return;
+    graph = window.WinnowScenes.createGraph($('graph-canvas'), {
+      theme: state.theme,
+      findings: state.data.findings,
+      groups: state.groups,
+      techniques: state.data.techniques,
+      showIdentities: state.showIdent,
+      showMitre: state.showMitre,
+      autoOrbit: state.spin,
+      onSelect: function (id) { state.selId = id; renderInspector(); }
+    });
+  }
+  function remountGraph() { if (graph) { graph.dispose(); graph = null; } mountGraph(); }
+
+  /* Idempotent guard: if a visible host has lost its canvas (theme flip, view
+     change, context loss) rebuild it. Cheap, and keeps the 3D from ever
+     silently disappearing. */
+  function ensureScenes() {
+    if (!window.THREE) return;
+    var heroHost = $('hero-canvas');
+    if (state.view === 'overview' && heroHost && !heroHost.children.length) { hero = null; mountHero(); }
+    var graphHost = $('graph-canvas');
+    if (state.view === 'graph' && graphHost && !graphHost.children.length) { graph = null; mountGraph(); }
+  }
+  setInterval(ensureScenes, 500);
+  function remountAll() {
+    if (hero) { hero.dispose(); hero = null; }
+    if (graph) { graph.dispose(); graph = null; }
+    mountHero(); mountGraph();
+  }
+
+  /* ---------------- command palette ---------------- */
+
+  function paletteItems() {
+    var items = NAV.map(function (n) { return { kind: 'view', label: n[1], meta: '', view: n[0] }; });
+    state.data.findings.forEach(function (f) { items.push({ kind: 'finding', label: f.title, meta: f.id, view: 'remediation', select: f.id }); });
+    state.data.techniques.forEach(function (t) { items.push({ kind: 'technique', label: t.id + ' · ' + t.name, meta: t.count + '×', view: 'visualizer' }); });
+    return items;
+  }
+
+  function renderPalette() {
+    var q = $('palette-input').value.trim().toLowerCase();
+    var items = paletteItems().filter(function (i) {
+      return !q || (i.label + ' ' + i.meta + ' ' + i.kind).toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 40);
+    state._paletteItems = items;
+    if (state.paletteIndex >= items.length) state.paletteIndex = 0;
+    $('palette-results').innerHTML = items.map(function (i, idx) {
+      return '<button class="palette-item' + (idx === state.paletteIndex ? ' sel' : '') + '" data-pi="' + idx + '">' +
+        '<span class="kind">' + esc(i.kind) + '</span><span class="label">' + esc(i.label) + '</span><span class="meta">' + esc(i.meta) + '</span></button>';
+    }).join('') || '<div style="padding:14px;color:var(--n-mute);font-size:12px">Nothing matches.</div>';
+  }
+
+  function openPalette() {
+    state.paletteOpen = true;
+    state.paletteIndex = 0;
+    $('palette-backdrop').hidden = false;
+    $('palette-input').value = '';
+    renderPalette();
+    $('palette-input').focus();
+  }
+  function closePalette() { state.paletteOpen = false; $('palette-backdrop').hidden = true; }
+  function runPalette(i) {
+    var item = (state._paletteItems || [])[i];
+    if (!item) return;
+    if (item.select) { state.selId = item.select; renderInspector(); renderRemediation(); }
+    closePalette();
+    goTo(item.view);
+  }
+
+  /* ---------------- navigation ---------------- */
+
+  function goTo(view) {
+    state.view = view;
+    Array.prototype.forEach.call(document.querySelectorAll('.view'), function (el) {
+      el.classList.toggle('active', el.getAttribute('data-view') === view);
+    });
+    renderNav();
+    renderTopbar();
+    if (view === 'overview') { renderOverview(); mountHero(); }
+    if (view === 'graph') { renderInspector(); mountGraph(); }
+    if (view === 'findings') renderFindings();
+    if (view === 'remediation') renderRemediation();
+    if (view === 'visualizer') renderVisualizer();
+    if (view === 'charts') renderCharts();
+    try { history.replaceState(null, '', '#' + view); } catch (e) {}
+  }
+
+  function renderAll() {
+    computeGroups();
+    if (!state.selId && state.data.findings.length) state.selId = state.data.findings[0].id;
+    renderNav(); renderTopbar();
+    renderOverview(); renderInspector(); renderFindings();
+    renderRemediation(); renderVisualizer(); renderCharts();
+  }
+
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', state.theme);
+    localStorage.setItem('winnow-theme', state.theme);
+    var dark = state.theme === 'dark';
+    $('theme-toggle').innerHTML = dark
+      ? icon(['M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'], 13)
+      : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>';
+    renderCharts();
+    remountAll();
+  }
+
+  /* ---------------- analysis ---------------- */
+
+  function analyze() {
+    $('status-text').textContent = 'Analyzing…';
+    fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      /* app.py reads data['iam_config'] and data['config_type']; it never
+         reads a 'config' key, so we do not send one. */
+      body: JSON.stringify({ iam_config: DEMO_CONFIG, config_type: 'terraform' })
+    })
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (payload) {
+        state.data = normalise(payload);
+        state.selId = null;
+        $('status-text').textContent = (state.data.aiCount ? 'Rule engine + AI · ' : 'Rule engine · ') + state.data.findings.length + ' findings';
+        renderAll();
+        remountGraph();
+      })
+      .catch(function () {
+        state.data = DEMO_RESULT;
+        state.selId = null;
+        $('status-text').textContent = 'Demo dataset · offline';
+        renderAll();
+        remountGraph();
+      });
+  }
+
+  /* ---------------- events ---------------- */
+
+  document.addEventListener('click', function (e) {
+    var pi = e.target.closest('[data-pi]');
+    if (pi) { runPalette(+pi.getAttribute('data-pi')); return; }
+
+    var sevBtn = e.target.closest('[data-sev]');
+    if (sevBtn) { state.sev = sevBtn.getAttribute('data-sev'); renderFindings(); return; }
+
+    var selEl = e.target.closest('[data-select]');
+    if (selEl) {
+      state.selId = selEl.getAttribute('data-select');
+      renderInspector();
+      renderRemediation();
     }
-}
 
-function closeModal() {
-    const modal = document.getElementById('detail-modal');
-    if (modal) modal.classList.remove('active');
-}
+    var nav = e.target.closest('[data-goto]');
+    if (nav) { goTo(nav.getAttribute('data-goto')); return; }
 
-function resetUI() {
-    updateSummaryCards({ critical: 0, high: 0, medium: 0, low: 0, total_vulnerabilities: 0, ai_suggested: 0 });
-    const tbody = document.querySelector('#vuln-table tbody');
-    if (tbody) tbody.innerHTML = '';
-    d3.select('#attack-graph-svg').selectAll('*').remove();
-    
-    const setEmpty = (id, html) => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = html;
-    };
+    if (e.target.closest('#palette-open')) { openPalette(); return; }
+    if (e.target.id === 'palette-backdrop') { closePalette(); return; }
+    if (e.target.closest('#theme-toggle')) { state.theme = state.theme === 'dark' ? 'light' : 'dark'; applyTheme(); return; }
+    if (e.target.closest('#reanalyze')) { analyze(); return; }
+    if (e.target.closest('#reset-cam')) { if (graph) graph.resetCamera(); return; }
+    if (e.target.closest('#copy-policy')) {
+      navigator.clipboard.writeText($('hardened-policy').textContent);
+      e.target.textContent = 'Copied';
+      setTimeout(function () { e.target.textContent = 'Copy'; }, 1400);
+      return;
+    }
+    if (e.target.closest('#t-ident')) { state.showIdent = !state.showIdent; $('t-ident').setAttribute('aria-pressed', state.showIdent); $('t-ident').textContent = state.showIdent ? 'Identities on' : 'Identities off'; remountGraph(); return; }
+    if (e.target.closest('#t-mitre')) { state.showMitre = !state.showMitre; $('t-mitre').setAttribute('aria-pressed', state.showMitre); $('t-mitre').textContent = state.showMitre ? 'MITRE on' : 'MITRE off'; remountGraph(); return; }
+    if (e.target.closest('#t-spin')) { state.spin = !state.spin; $('t-spin').setAttribute('aria-pressed', state.spin); $('t-spin').textContent = state.spin ? 'Auto-orbit' : 'Static'; if (graph) graph.setAutoOrbit(state.spin); return; }
+  });
 
-    setEmpty('escalation-chains', '<p class="empty-state">No data</p>');
-    setEmpty('resource-risk-map', '<p class="empty-state">No data</p>');
-    setEmpty('remediation-timeline', '<p class="empty-state">No data</p>');
-    setEmpty('remediation-content', '<div class="empty-state-container"><p class="empty-state">Select a finding to see remediation details.</p></div>');
-    
-    destroyCharts();
-}
+  $('finding-search').addEventListener('input', function (e) { state.query = e.target.value; renderFindings(); });
+  $('palette-input').addEventListener('input', function () { state.paletteIndex = 0; renderPalette(); });
 
-// Escapes for both text and attribute contexts. The previous textContent-based
-// implementation did not escape quotes, so values interpolated into attributes
-// (class="...", title="...", style="...") could break out and inject handlers.
-function escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+  window.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+    if (!state.paletteOpen) return;
+    if (e.key === 'Escape') { closePalette(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); state.paletteIndex = Math.min(state.paletteIndex + 1, (state._paletteItems || []).length - 1); renderPalette(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); state.paletteIndex = Math.max(0, state.paletteIndex - 1); renderPalette(); }
+    if (e.key === 'Enter') { e.preventDefault(); runPalette(state.paletteIndex); }
+  });
 
-// For values used inside class names / CSS: allow only safe characters.
-function safeToken(value, fallback = '') {
-    const token = String(value ?? '').toLowerCase();
-    return /^[a-z0-9_-]+$/.test(token) ? token : fallback;
-}
+  /* ---------------- boot ---------------- */
 
-function getSeverityColor(severity) {
-    const colors = {
-        'CRITICAL': '#f43f5e',
-        'HIGH': '#f97316',
-        'MEDIUM': '#eab308',
-        'LOW': '#10b981'
-    };
-    return colors[severity] || '#64748b';
-}
-
-window.showRemediation = showRemediation;
+  applyTheme();
+  renderAll();
+  /* Default the hash BEFORE using it: on a plain visit location.hash is '',
+     and the old one-liner tested the defaulted value but passed the raw one,
+     so goTo('') matched no section and the whole app booted blank. */
+  var initialView = (location.hash || '').slice(1);
+  goTo(initialView in TITLES ? initialView : 'overview');
+  analyze();
+})();
