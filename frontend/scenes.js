@@ -216,6 +216,74 @@
       return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
     }
 
+    /* Identity name printed on the box's front face: a canvas texture on a
+       camera-facing Sprite, drawn on top (depthTest off) so it stays readable as
+       the scene orbits. Sized in world units to sit inside the 2.6 x 0.8 box
+       without touching its edges; long names are ellipsised so every label keeps
+       the same text size. A faint rounded backing (same idea as the app's chips)
+       holds legibility where the text crosses the light background, a wireframe
+       edge, or a connector line. */
+    var LABEL_W = 2.2;   // world units — box is 2.6 wide
+    var LABEL_H = 0.4;   // world units — box is 0.8 tall
+    var labelSprites = [];
+
+    function makeBoxLabel(text) {
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var font = '600 48px Inter, system-ui, -apple-system, sans-serif';
+      var padX = 22, canvasH = 76;
+      var maxTextW = canvasH * (LABEL_W / LABEL_H) - padX * 2;
+
+      var m = document.createElement('canvas').getContext('2d');
+      m.font = font;
+      var label = String(text == null ? '' : text);
+      if (m.measureText(label).width > maxTextW) {
+        while (label.length > 1 && m.measureText(label + '…').width > maxTextW) label = label.slice(0, -1);
+        label += '…';
+      }
+      var canvasW = Math.max(2, Math.ceil(m.measureText(label).width) + padX * 2);
+
+      var c = document.createElement('canvas');
+      c.width = Math.round(canvasW * dpr);
+      c.height = Math.round(canvasH * dpr);
+      var ctx = c.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      var r = 11, inset = 4;
+      ctx.beginPath();
+      ctx.moveTo(inset + r, inset);
+      ctx.arcTo(canvasW - inset, inset, canvasW - inset, canvasH - inset, r);
+      ctx.arcTo(canvasW - inset, canvasH - inset, inset, canvasH - inset, r);
+      ctx.arcTo(inset, canvasH - inset, inset, inset, r);
+      ctx.arcTo(inset, inset, canvasW - inset, inset, r);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(13,15,16,0.55)';
+      ctx.fill();
+
+      ctx.font = font;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#eef0ef';
+      ctx.fillText(label, canvasW / 2, canvasH / 2 + 1);
+
+      var tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      var spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+      spr.scale.set(LABEL_H * (canvasW / canvasH), LABEL_H, 1);
+      spr.renderOrder = 12;
+      labelSprites.push(spr);
+      return spr;
+    }
+
+    /* Keep labels from stacking when two boxes land at nearly the same height
+       (identPos clusters identities by their findings' mean position). Only the
+       label sprite shifts — the box and its connector lines stay exactly put. */
+    var labelY = {};
+    groups.map(function (g) { return { name: g.name, y: identPos[g.name].y }; })
+      .sort(function (a, b) { return b.y - a.y; })
+      .forEach(function (e, i, arr) {
+        labelY[e.name] = i === 0 ? e.y : Math.min(e.y, labelY[arr[i - 1].name] - (LABEL_H + 0.14));
+      });
+
     if (showIdent) {
       groups.forEach(function (g) {
         var box = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.8, 0.5), metal(dark ? 0x2f3437 : 0xcfd2d1, { roughness: 0.45 }));
@@ -224,6 +292,9 @@
         var edges = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), new THREE.LineBasicMaterial({ color: dark ? 0xc3c7c6 : 0x4e5356 }));
         edges.position.copy(box.position);
         world.add(edges);
+        var label = makeBoxLabel(g.name);
+        label.position.set(identPos[g.name].x, labelY[g.name], identPos[g.name].z + 0.02);
+        world.add(label);
         g.ids.forEach(function (id) {
           var f = findings.find(function (x) { return x.id === id; });
           if (!f) return;
@@ -340,6 +411,10 @@
         window.removeEventListener('mouseup', onUp);
         el.removeEventListener('wheel', onWheel);
         el.removeEventListener('click', onClick);
+        labelSprites.forEach(function (s) {
+          if (s.material.map) s.material.map.dispose();
+          s.material.dispose();
+        });
         unwatch();
         if (el.parentNode) el.parentNode.removeChild(el);
         renderer.dispose();

@@ -152,6 +152,8 @@
     selId: null,
     query: '',
     sev: 'ALL',
+    gdQuery: '',
+    gdSev: 'ALL',
     showIdent: true,
     showMitre: true,
     spin: true,
@@ -376,27 +378,53 @@
   }
 
   /* Text mirror of the 3D attack graph, shown below it: every identity, the
-     findings on it, and the MITRE techniques each finding maps to. The selected
+     findings on it, and the MITRE techniques each finding maps to. A selected
      node — clicked in the 3D view or in a row here — is highlighted and scrolled
-     into view. Always lists the whole graph; clicks never filter it. */
+     into view. The search box + severity chips filter the rows (they never
+     touch the 3D scene). Only #gd-body / #gd-meta / #gd-sev-filters are
+     rewritten, so the search input keeps focus while typing. */
+  function gdRowMatches(f, q) {
+    if (state.gdSev !== 'ALL' && f.severity !== state.gdSev) return false;
+    if (!q) return true;
+    return (f.id + ' ' + f.title + ' ' + f.resource + ' ' + (f.mitre || []).join(' '))
+      .toLowerCase().indexOf(q) >= 0;
+  }
+
   function renderGraphDetail() {
     var host = $('graph-detail');
-    if (!host) return;
+    var body = $('gd-body');
+    if (!host || !body) return;
     var groups = state.groups || [];
-    if (!groups.length) { host.innerHTML = '<div class="gd-empty">No findings to break down.</div>'; return; }
+
+    var filters = $('gd-sev-filters');
+    if (filters) {
+      filters.innerHTML = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (k) {
+        var label = k === 'ALL' ? 'All' : k.charAt(0) + k.slice(1).toLowerCase();
+        return '<button class="chip" data-gd-sev="' + k + '" aria-pressed="' + (state.gdSev === k) + '">' + label + '</button>';
+      }).join('');
+    }
+
+    if (!groups.length) {
+      body.innerHTML = '<div class="gd-empty">No findings to break down.</div>';
+      if ($('gd-meta')) $('gd-meta').textContent = '';
+      return;
+    }
 
     var techById = {};
     (state.data.techniques || []).forEach(function (t) { techById[t.id] = t; });
-    var totalTechs = (state.data.techniques || []).length;
+    var q = state.gdQuery.trim().toLowerCase();
+    var shown = 0;
 
-    var html = '<div class="gd-head"><span class="panel-title">Graph breakdown</span>' +
-      '<span class="panel-meta">' + groups.length + ' identities · ' +
-      state.data.findings.length + ' findings · ' + totalTechs + ' techniques</span></div>';
-
-    html += groups.map(function (g) {
-      var rows = g.ids.map(function (id) {
+    var html = groups.map(function (g) {
+      var matched = g.ids.filter(function (id) {
         var f = findingById(id);
-        if (!f || f.id !== id) return '';
+        return f && f.id === id && gdRowMatches(f, q);
+      });
+      if (!matched.length) return '';
+      shown += matched.length;
+
+      var rows = matched.map(function (id) {
+        var f = findingById(id);
         var techs = (f.mitre || []).map(function (m) {
           var t = techById[m];
           return '<span class="gd-tech" title="' + esc((t && t.tactic) || '') + '">' +
@@ -414,17 +442,25 @@
         '<div class="gd-identity">' +
           '<span class="gd-name">' + esc(g.name) + '</span>' +
           '<span class="gd-type mono">' + esc(g.type || 'identity') + '</span>' +
-          '<span class="gd-count">' + g.ids.length + (g.ids.length === 1 ? ' finding' : ' findings') + '</span>' +
+          '<span class="gd-count">' + matched.length +
+            (matched.length === g.ids.length ? '' : ' of ' + g.ids.length) +
+            (g.ids.length === 1 && matched.length === 1 ? ' finding' : ' findings') + '</span>' +
         '</div>' + rows +
       '</div>';
     }).join('');
 
-    host.innerHTML = html;
+    body.innerHTML = html || '<div class="gd-empty">No findings match that filter.</div>';
 
-    var sel = host.querySelector('.gd-row.sel');
+    if ($('gd-meta')) {
+      var total = state.data.findings.length;
+      $('gd-meta').textContent = (shown === total ? total + ' findings' : shown + ' of ' + total + ' findings') +
+        ' · ' + groups.length + ' identities';
+    }
+
+    var sel = body.querySelector('.gd-row.sel');
     if (sel) {
       var hr = host.getBoundingClientRect(), r = sel.getBoundingClientRect();
-      if (r.top < hr.top + 40 || r.bottom > hr.bottom) {
+      if (r.top < hr.top + 72 || r.bottom > hr.bottom) {
         host.scrollTop += (r.top - hr.top) - (host.clientHeight - r.height) / 2;
       }
     }
@@ -797,6 +833,9 @@
     var sevBtn = e.target.closest('[data-sev]');
     if (sevBtn) { state.sev = sevBtn.getAttribute('data-sev'); renderFindings(); return; }
 
+    var gdSevBtn = e.target.closest('[data-gd-sev]');
+    if (gdSevBtn) { state.gdSev = gdSevBtn.getAttribute('data-gd-sev'); renderGraphDetail(); return; }
+
     var selEl = e.target.closest('[data-select]');
     if (selEl) {
       state.selId = selEl.getAttribute('data-select');
@@ -826,6 +865,7 @@
   });
 
   $('finding-search').addEventListener('input', function (e) { state.query = e.target.value; renderFindings(); });
+  $('gd-search').addEventListener('input', function (e) { state.gdQuery = e.target.value; renderGraphDetail(); });
   $('palette-input').addEventListener('input', function () { state.paletteIndex = 0; renderPalette(); });
 
   window.addEventListener('keydown', function (e) {

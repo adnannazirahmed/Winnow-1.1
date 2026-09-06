@@ -293,10 +293,16 @@ a:hover { color: var(--n-ink); }
 }
 .graph-detail .gd-head {
   position: sticky; top: 0; z-index: 2;
-  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-  padding: 13px 16px; border-bottom: 1px solid var(--n-line);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--n-line);
   background: var(--n-panel);
 }
+.gd-head-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.gd-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gd-tools .search-field { flex: 1 1 200px; max-width: 320px; }
+.gd-tools .search-field input { font-size: 12px; padding-top: 7px; padding-bottom: 7px; }
+.gd-sev-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.gd-sev-filters .chip { padding: 5px 11px; font-size: 11px; }
 .gd-empty { padding: 20px 16px; font-size: 12px; color: var(--n-mute); }
 .gd-group { border-bottom: 1px solid var(--n-line-2); }
 .gd-group:last-child { border-bottom: 0; }
