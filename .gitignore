@@ -22,6 +22,10 @@ backend/.env
 .DS_Store
 Thumbs.db
 
+# Runtime logs
+*.log
+backend/server.log
+
 # Editors
 .vscode/
 .idea/
