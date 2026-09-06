@@ -94,7 +94,8 @@
       <!-- ATTACK GRAPH (3D) -->
       <section class="view" data-view="graph">
         <div class="graph-toolbar">
-          <button class="chip" id="t-mitre" aria-pressed="true">Policies on</button>
+          <button class="chip" id="t-ident" aria-pressed="true">Identities on</button>
+          <button class="chip" id="t-mitre" aria-pressed="true">MITRE on</button>
           <button class="chip" id="t-spin" aria-pressed="true">Auto-orbit</button>
           <span class="spacer"></span>
           <span class="hint">drag to orbit · scroll to zoom · click a node</span>
@@ -104,17 +105,20 @@
         <div class="graph-layout">
           <div class="graph-stage">
             <div class="graph-canvas" id="graph-canvas"></div>
-            <div class="graph-cols"><span>IDENTITIES</span><span></span><span>POLICIES</span></div>
+            <div class="graph-cols"><span>IDENTITIES</span><span>FINDINGS</span><span>MITRE ATT&amp;CK</span></div>
             <div class="legend">
               <span><i class="swatch box"></i>Identity</span>
-              <span><i class="swatch" style="background:#5fa8d3"></i>can assume</span>
-              <span><i class="swatch" style="background:var(--n-crit)"></i>escalation path</span>
-              <span><i class="swatch" style="background:var(--n-mute)"></i>policy</span>
+              <span><i class="swatch" style="background:var(--n-crit)"></i>Critical</span>
+              <span><i class="swatch" style="background:var(--n-high)"></i>High</span>
+              <span><i class="swatch" style="background:var(--n-med)"></i>Medium</span>
+              <span><i class="swatch diamond"></i>Technique</span>
             </div>
           </div>
 
           <div class="panel inspector" id="inspector"></div>
         </div>
+
+        <div class="panel graph-detail" id="graph-detail"></div>
       </section>
 
       <!-- FINDINGS -->

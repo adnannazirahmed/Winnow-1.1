@@ -375,6 +375,61 @@
       '<button class="btn" data-goto="remediation" style="margin-top:4px;border-color:var(--n-acc)">Open remediation</button>';
   }
 
+  /* Text mirror of the 3D attack graph, shown below it: every identity, the
+     findings on it, and the MITRE techniques each finding maps to. The selected
+     node — clicked in the 3D view or in a row here — is highlighted and scrolled
+     into view. Always lists the whole graph; clicks never filter it. */
+  function renderGraphDetail() {
+    var host = $('graph-detail');
+    if (!host) return;
+    var groups = state.groups || [];
+    if (!groups.length) { host.innerHTML = '<div class="gd-empty">No findings to break down.</div>'; return; }
+
+    var techById = {};
+    (state.data.techniques || []).forEach(function (t) { techById[t.id] = t; });
+    var totalTechs = (state.data.techniques || []).length;
+
+    var html = '<div class="gd-head"><span class="panel-title">Graph breakdown</span>' +
+      '<span class="panel-meta">' + groups.length + ' identities · ' +
+      state.data.findings.length + ' findings · ' + totalTechs + ' techniques</span></div>';
+
+    html += groups.map(function (g) {
+      var rows = g.ids.map(function (id) {
+        var f = findingById(id);
+        if (!f || f.id !== id) return '';
+        var techs = (f.mitre || []).map(function (m) {
+          var t = techById[m];
+          return '<span class="gd-tech" title="' + esc((t && t.tactic) || '') + '">' +
+            esc(m) + (t && t.name ? ' · ' + esc(t.name) : '') + '</span>';
+        }).join('');
+        return '<button class="gd-row' + (id === state.selId ? ' sel' : '') + '" data-select="' + esc(id) + '">' +
+          '<i class="dot" style="background:' + SEV_VAR[f.severity] + '"></i>' +
+          '<span class="gd-id">' + esc(f.id) + '</span>' +
+          '<span class="gd-title">' + esc(f.title) + '</span>' +
+          '<span class="gd-sev" style="color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span>' +
+          '<span class="gd-techs">' + (techs || '<span class="gd-tech gd-none">no technique</span>') + '</span>' +
+        '</button>';
+      }).join('');
+      return '<div class="gd-group">' +
+        '<div class="gd-identity">' +
+          '<span class="gd-name">' + esc(g.name) + '</span>' +
+          '<span class="gd-type mono">' + esc(g.type || 'identity') + '</span>' +
+          '<span class="gd-count">' + g.ids.length + (g.ids.length === 1 ? ' finding' : ' findings') + '</span>' +
+        '</div>' + rows +
+      '</div>';
+    }).join('');
+
+    host.innerHTML = html;
+
+    var sel = host.querySelector('.gd-row.sel');
+    if (sel) {
+      var hr = host.getBoundingClientRect(), r = sel.getBoundingClientRect();
+      if (r.top < hr.top + 40 || r.bottom > hr.bottom) {
+        host.scrollTop += (r.top - hr.top) - (host.clientHeight - r.height) / 2;
+      }
+    }
+  }
+
   function renderFindings() {
     var q = state.query.trim().toLowerCase();
     var rows = state.data.findings.filter(function (f) {
@@ -572,14 +627,13 @@
     if (graph || state.view !== 'graph') return;
     graph = window.WinnowScenes.createGraph($('graph-canvas'), {
       theme: state.theme,
-      permissionGraph: state.data.permGraph,
       findings: state.data.findings,
       groups: state.groups,
       techniques: state.data.techniques,
       showIdentities: state.showIdent,
       showMitre: state.showMitre,
       autoOrbit: state.spin,
-      onSelect: function (id) { state.selId = id; renderInspector(); }
+      onSelect: function (id) { state.selId = id; renderInspector(); renderGraphDetail(); }
     });
   }
   function remountGraph() { if (graph) { graph.dispose(); graph = null; } mountGraph(); }
@@ -650,7 +704,7 @@
     renderNav();
     renderTopbar();
     if (view === 'overview') { renderOverview(); mountHero(); }
-    if (view === 'graph') { renderInspector(); mountGraph(); }
+    if (view === 'graph') { renderInspector(); renderGraphDetail(); mountGraph(); }
     if (view === 'findings') renderFindings();
     if (view === 'remediation') renderRemediation();
     if (view === 'visualizer') renderVisualizer();
@@ -664,6 +718,7 @@
     renderNav(); renderTopbar();
     renderOverview(); renderInspector(); renderFindings();
     renderRemediation(); renderVisualizer(); renderCharts();
+    renderGraphDetail();
   }
 
   function applyTheme() {
@@ -747,6 +802,7 @@
       state.selId = selEl.getAttribute('data-select');
       renderInspector();
       renderRemediation();
+      renderGraphDetail();
     }
 
     var nav = e.target.closest('[data-goto]');
