@@ -390,7 +390,7 @@
       .toLowerCase().indexOf(q) >= 0;
   }
 
-  function renderGraphDetail() {
+  function renderGraphDetail(scrollToSel) {
     var host = $('graph-detail');
     var body = $('gd-body');
     if (!host || !body) return;
@@ -457,11 +457,16 @@
         ' · ' + groups.length + ' identities';
     }
 
-    var sel = body.querySelector('.gd-row.sel');
-    if (sel) {
-      var hr = host.getBoundingClientRect(), r = sel.getBoundingClientRect();
-      if (r.top < hr.top + 72 || r.bottom > hr.bottom) {
-        host.scrollTop += (r.top - hr.top) - (host.clientHeight - r.height) / 2;
+    /* Only chase the selected row into view when the user just picked it (a 3D
+       node or a row click). On load / filter / data refresh, leave the panel at
+       the top — otherwise every reload jumps to whatever VULN-0001 maps to. */
+    if (scrollToSel) {
+      var sel = body.querySelector('.gd-row.sel');
+      if (sel) {
+        var hr = host.getBoundingClientRect(), r = sel.getBoundingClientRect();
+        if (r.top < hr.top + 72 || r.bottom > hr.bottom) {
+          host.scrollTop += (r.top - hr.top) - (host.clientHeight - r.height) / 2;
+        }
       }
     }
   }
@@ -669,7 +674,7 @@
       showIdentities: state.showIdent,
       showMitre: state.showMitre,
       autoOrbit: state.spin,
-      onSelect: function (id) { state.selId = id; renderInspector(); renderGraphDetail(); }
+      onSelect: function (id) { state.selId = id; renderInspector(); renderGraphDetail(true); }
     });
   }
   function remountGraph() { if (graph) { graph.dispose(); graph = null; } mountGraph(); }
@@ -879,6 +884,11 @@
 
   /* ---------------- boot ---------------- */
 
+  /* Reload lands at the top of the view, not wherever the page was scrolled.
+     The app drives navigation with replaceState (no real back/forward stack),
+     so nothing needs the browser's saved scroll position. */
+  try { history.scrollRestoration = 'manual'; } catch (e) {}
+
   applyTheme();
   renderAll();
   /* Default the hash BEFORE using it: on a plain visit location.hash is '',
@@ -886,5 +896,6 @@
      so goTo('') matched no section and the whole app booted blank. */
   var initialView = (location.hash || '').slice(1);
   goTo(initialView in TITLES ? initialView : 'overview');
+  window.scrollTo(0, 0);
   analyze();
 })();
