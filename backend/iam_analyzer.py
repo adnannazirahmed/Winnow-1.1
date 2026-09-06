@@ -422,119 +422,224 @@ class IAMAnalyzer:
                 path.append(f'... and {len(resources) - 3} more')
         return path
 
+    # ------------------------------------------------------------------
+    #  Supplementary scan over the normalized IAMData model.
+    #  Runs alongside the graph escalation engine: it flags dangerous
+    #  permissions per policy regardless of whether an identity can
+    #  actually reach them (which the graph engine, with its reachability
+    #  filter, deliberately does not). Findings are tagged 'rule'.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _statement_to_dict(stmt) -> Dict:
+        cond: Dict[str, Dict[str, list]] = {}
+        for c in stmt.conditions:
+            cond.setdefault(c.operator, {})[c.key] = list(c.values)
+        return {
+            'Effect': stmt.effect.value,
+            'Action': list(stmt.actions),
+            'Resource': list(stmt.resources) or ['*'],
+            'Condition': cond,
+        }
+
+    @staticmethod
+    def _allow_statements_after_denies(statements) -> List[Dict]:
+        """Allow statements as dicts, with any action a same-document Deny covers
+        on a matching resource removed. Keeps the rule scan from flagging a
+        permission the policy itself denies (e.g. Allow iam:X + Deny iam:*)."""
+        import re as _re
+        denies = [s for s in statements if s.effect.value == 'Deny']
+
+        def _covers(deny, action, resources):
+            deny_res = deny.resources or ['*']
+            if not any(r == '*' or r in resources or (resources and '*' in resources) for r in deny_res):
+                return False
+            for pat in (deny.actions or []):
+                rx = '^' + _re.escape(pat).replace('\\*', '.*').replace('\\?', '.') + '$'
+                if _re.match(rx, action, _re.IGNORECASE):
+                    return True
+            return False
+
+        out = []
+        for stmt in statements:
+            if stmt.effect.value != 'Allow':
+                continue
+            d = IAMAnalyzer._statement_to_dict(stmt)
+            d['Action'] = [a for a in d['Action']
+                           if not any(_covers(dn, a, d['Resource']) for dn in denies)]
+            if d['Action']:
+                out.append(d)
+        return out
+
+    def scan_iamdata(self, iam_data) -> List[Dict]:
+        vulnerabilities: List[Dict] = []
+
+        for policy in iam_data.policies:
+            for idx, d in enumerate(self._allow_statements_after_denies(policy.document.statements)):
+                vulnerabilities.extend(self._analyze_statement(
+                    d, policy.policy_name, 'aws_iam_policy', idx))
+
+        for kind, entities in (('aws_iam_user', iam_data.users),
+                               ('aws_iam_role', iam_data.roles),
+                               ('aws_iam_group', iam_data.groups)):
+            for entity in entities:
+                name = getattr(entity, 'user_name', None) or getattr(entity, 'role_name', None) \
+                    or getattr(entity, 'group_name', 'unknown')
+                for att in entity.attached_managed_policies:
+                    vulnerabilities.append(asdict(Vulnerability(
+                        id='',
+                        pattern_id='attached_managed_policy',
+                        title=f'Attached Managed Policy: {att.policy_arn}',
+                        description=f'{kind} {name} has managed policy attached: {att.policy_arn}',
+                        severity='MEDIUM',
+                        resource_type=kind,
+                        resource_name=name,
+                        policy_document={'attached_policy_arn': att.policy_arn},
+                        attack_path=[f'Identity: {name}', f'Policy: {att.policy_arn}'],
+                        mitre_techniques=['T1098.001'],
+                        remediation_hint='Review managed policy permissions; use least privilege',
+                    )))
+                for pol in entity.inline_policies:
+                    for idx, d in enumerate(self._allow_statements_after_denies(pol.document.statements)):
+                        vulnerabilities.extend(self._analyze_statement(d, name, kind, idx))
+
+        return vulnerabilities
+
     def generate_dummy_data(self) -> Dict:
+        """A small but realistic account that exercises the whole engine:
+        a direct escalation, one via group membership, one via assume-role,
+        a role only a service can assume (filtered out), and a user whose
+        escalation permission is neutralized by an explicit Deny."""
+        acct = "123456789012"
         return {
             "resources": [
-                {
-                    "type": "aws_iam_policy",
-                    "name": "VulnerableAdminPolicy",
-                    "values": {
-                        "name": "VulnerableAdminPolicy",
-                        "policy": {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "iam:AttachUserPolicy",
-                                        "iam:PutUserPolicy",
-                                        "iam:CreateAccessKey",
-                                        "iam:UpdateLoginProfile",
-                                        "sts:AssumeRole",
-                                        "iam:PassRole",
-                                        "iam:CreateRole",
-                                        "iam:PutRolePolicy",
-                                        "iam:AttachRolePolicy",
-                                        "iam:UpdateAssumeRolePolicy",
-                                        "ec2:RunInstances",
-                                        "lambda:CreateFunction",
-                                        "lambda:UpdateFunctionCode"
-                                    ],
-                                    "Resource": "*"
-                                }
-                            ]
-                        }
-                    }
-                },
-                {
-                    "type": "aws_iam_role",
-                    "name": "VulnerableEC2Role",
-                    "values": {
-                        "name": "VulnerableEC2Role",
-                        "assume_role_policy": {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Principal": {"Service": "ec2.amazonaws.com"},
-                                    "Action": "sts:AssumeRole"
-                                }
-                            ]
-                        },
-                        "attached_policy_arns": [
-                            "arn:aws:iam::123456789012:policy/VulnerableAdminPolicy"
-                        ]
-                    }
-                },
                 {
                     "type": "aws_iam_user",
                     "name": "CompromisedUser",
                     "values": {
                         "name": "CompromisedUser",
-                        "attached_policy_arns": [
-                            "arn:aws:iam::123456789012:policy/ReadOnlyAccess"
-                        ],
+                        "arn": f"arn:aws:iam::{acct}:user/CompromisedUser",
+                        "group_list": ["Developers"],
+                        "attached_policy_arns": ["arn:aws:iam::aws:policy/ReadOnlyAccess"],
                         "policy": [
                             {
-                                "name": "InlineEscalationPolicy",
+                                "name": "DirectEscalation",
                                 "policy": {
                                     "Version": "2012-10-17",
                                     "Statement": [
-                                        {
-                                            "Effect": "Allow",
-                                            "Action": [
-                                                "iam:AttachUserPolicy",
-                                                "iam:CreateAccessKey"
-                                            ],
-                                            "Resource": "*"
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                },
-                {
-                    "type": "aws_iam_policy",
-                    "name": "LambdaEscalationPolicy",
-                    "values": {
-                        "name": "LambdaEscalationPolicy",
-                        "policy": {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "lambda:CreateFunction",
-                                        "lambda:UpdateFunctionCode",
-                                        "iam:PassRole"
+                                        {"Effect": "Allow",
+                                         "Action": ["iam:AttachUserPolicy", "iam:CreateAccessKey"],
+                                         "Resource": "*"},
+                                        {"Effect": "Allow", "Action": "sts:AssumeRole", "Resource": "*"},
                                     ],
-                                    "Resource": "*"
-                                }
-                            ]
-                        }
-                    }
+                                },
+                            }
+                        ],
+                    },
                 },
                 {
                     "type": "aws_iam_group",
-                    "name": "DevelopersGroup",
+                    "name": "Developers",
                     "values": {
-                        "name": "DevelopersGroup",
-                        "attached_policy_arns": [
-                            "arn:aws:iam::aws:policy/PowerUserAccess"
+                        "name": "Developers",
+                        "arn": f"arn:aws:iam::{acct}:group/Developers",
+                        "attached_policy_arns": ["arn:aws:iam::aws:policy/PowerUserAccess"],
+                        "policy": [
+                            {
+                                "name": "TeamPipeline",
+                                "policy": {
+                                    "Version": "2012-10-17",
+                                    "Statement": [{
+                                        "Effect": "Allow",
+                                        "Action": ["iam:PassRole", "lambda:CreateFunction", "lambda:InvokeFunction"],
+                                        "Resource": "*",
+                                    }],
+                                },
+                            }
                         ],
-                        "policy": []
-                    }
-                }
+                    },
+                },
+                {
+                    "type": "aws_iam_role",
+                    "name": "DeployRole",
+                    "values": {
+                        "name": "DeployRole",
+                        "arn": f"arn:aws:iam::{acct}:role/DeployRole",
+                        "assume_role_policy": {
+                            "Version": "2012-10-17",
+                            "Statement": [{
+                                "Effect": "Allow",
+                                "Principal": {"AWS": f"arn:aws:iam::{acct}:user/CompromisedUser"},
+                                "Action": "sts:AssumeRole",
+                            }],
+                        },
+                        "attached_policy_arns": [f"arn:aws:iam::{acct}:policy/PolicyToolsPolicy"],
+                    },
+                },
+                {
+                    "type": "aws_iam_policy",
+                    "name": "PolicyToolsPolicy",
+                    "values": {
+                        "name": "PolicyToolsPolicy",
+                        "arn": f"arn:aws:iam::{acct}:policy/PolicyToolsPolicy",
+                        "policy": {
+                            "Version": "2012-10-17",
+                            "Statement": [{
+                                "Effect": "Allow",
+                                "Action": ["iam:CreatePolicyVersion", "iam:PutRolePolicy"],
+                                "Resource": "*",
+                            }],
+                        },
+                    },
+                },
+                {
+                    "type": "aws_iam_role",
+                    "name": "EC2AppRole",
+                    "values": {
+                        "name": "EC2AppRole",
+                        "arn": f"arn:aws:iam::{acct}:role/EC2AppRole",
+                        "assume_role_policy": {
+                            "Version": "2012-10-17",
+                            "Statement": [{
+                                "Effect": "Allow",
+                                "Principal": {"Service": "ec2.amazonaws.com"},
+                                "Action": "sts:AssumeRole",
+                            }],
+                        },
+                        "attached_policy_arns": [f"arn:aws:iam::{acct}:policy/BroadAdminPolicy"],
+                    },
+                },
+                {
+                    "type": "aws_iam_policy",
+                    "name": "BroadAdminPolicy",
+                    "values": {
+                        "name": "BroadAdminPolicy",
+                        "arn": f"arn:aws:iam::{acct}:policy/BroadAdminPolicy",
+                        "policy": {
+                            "Version": "2012-10-17",
+                            "Statement": [{"Effect": "Allow", "Action": "iam:*", "Resource": "*"}],
+                        },
+                    },
+                },
+                {
+                    "type": "aws_iam_user",
+                    "name": "Auditor",
+                    "values": {
+                        "name": "Auditor",
+                        "arn": f"arn:aws:iam::{acct}:user/Auditor",
+                        "policy": [
+                            {
+                                "name": "AuditAccess",
+                                "policy": {
+                                    "Version": "2012-10-17",
+                                    "Statement": [
+                                        {"Effect": "Allow", "Action": "iam:CreatePolicyVersion", "Resource": "*"},
+                                        {"Effect": "Deny", "Action": "iam:*", "Resource": "*"},
+                                    ],
+                                },
+                            }
+                        ],
+                    },
+                },
             ]
         }

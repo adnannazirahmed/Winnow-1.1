@@ -1,0 +1,67 @@
+{
+  "UserDetailList": [
+    {
+      "UserName": "Alice",
+      "Arn": "arn:aws:iam::123:user/Alice",
+      "GroupList": [
+        "Developers"
+      ],
+      "AttachedManagedPolicies": []
+    },
+    {
+      "UserName": "Bob",
+      "Arn": "arn:aws:iam::123:user/Bob",
+      "GroupList": [
+        "Developers"
+      ],
+      "AttachedManagedPolicies": []
+    }
+  ],
+  "GroupDetailList": [
+    {
+      "GroupName": "Developers",
+      "Arn": "arn:aws:iam::123:group/Developers",
+      "AttachedManagedPolicies": [
+        {
+          "PolicyName": "ViewOnly",
+          "PolicyArn": "arn:aws:iam::aws:policy/ViewOnlyAccess"
+        }
+      ]
+    }
+  ],
+  "RoleDetailList": [
+    {
+      "RoleName": "AppRole",
+      "Arn": "arn:aws:iam::123:role/AppRole",
+      "AssumeRolePolicyDocument": {
+        "Statement": []
+      },
+      "AttachedManagedPolicies": []
+    }
+  ],
+  "Policies": [
+    {
+      "PolicyName": "ViewOnly",
+      "Arn": "arn:aws:iam::aws:policy/ViewOnlyAccess",
+      "PolicyVersionList": [
+        {
+          "IsDefaultVersion": true,
+          "Document": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:Get*",
+                  "s3:List*"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

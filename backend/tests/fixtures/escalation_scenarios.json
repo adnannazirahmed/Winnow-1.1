@@ -1,0 +1,45 @@
+{
+  "UserDetailList": [
+    {
+      "UserName": "BadActor1",
+      "Arn": "arn:aws:iam::123:user/BadActor1",
+      "UserPolicyList": [
+        {
+          "PolicyName": "EscalationPolicy",
+          "PolicyDocument": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:PassRole",
+                  "lambda:CreateFunction"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:CreatePolicyVersion"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:AttachUserPolicy"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

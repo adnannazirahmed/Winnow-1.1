@@ -35,19 +35,9 @@
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
   var SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
-  /* ---------------- demo IAM configuration (posted to the analyzer) ---------------- */
-
-  var DEMO_CONFIG = {
-    resources: [
-      { type: 'aws_iam_policy', name: 'VulnerableAdminPolicy', values: { name: 'VulnerableAdminPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['iam:AttachUserPolicy', 'iam:PutUserPolicy', 'iam:CreateAccessKey', 'iam:UpdateLoginProfile', 'sts:AssumeRole', 'iam:PassRole', 'iam:CreateRole', 'iam:PutRolePolicy', 'iam:AttachRolePolicy', 'iam:UpdateAssumeRolePolicy', 'ec2:RunInstances', 'lambda:CreateFunction', 'lambda:UpdateFunctionCode'], Resource: '*' }] } } },
-      { type: 'aws_iam_role', name: 'VulnerableEC2Role', values: { name: 'VulnerableEC2Role', attached_policy_arns: ['arn:aws:iam::123456789012:policy/VulnerableAdminPolicy'] } },
-      { type: 'aws_iam_user', name: 'CompromisedUser', values: { name: 'CompromisedUser', attached_policy_arns: ['arn:aws:iam::123456789012:policy/ReadOnlyAccess'], policy: [{ name: 'InlineEscalationPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['iam:AttachUserPolicy', 'iam:CreateAccessKey'], Resource: '*' }] } }] } },
-      { type: 'aws_iam_policy', name: 'LambdaEscalationPolicy', values: { name: 'LambdaEscalationPolicy', policy: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['lambda:CreateFunction', 'lambda:UpdateFunctionCode', 'iam:PassRole'], Resource: '*' }] } } },
-      { type: 'aws_iam_group', name: 'DevelopersGroup', values: { name: 'DevelopersGroup', attached_policy_arns: ['arn:aws:iam::aws:policy/PowerUserAccess'], policy: [] } }
-    ]
-  };
-
-  /* ---------------- fallback dataset (offline preview only) ---------------- */
+  /* ---------------- fallback dataset (offline preview only) ----------------
+     The live demo config comes from GET-less POST /api/generate-dummy; this
+     bundled result only renders when the backend is unreachable. */
 
   function F(id, title, severity, resource, resourceType, mitre, path, description) {
     return { id: id, title: title, severity: severity, resource: resource, resource_type: resourceType, mitre: mitre, attack_path: path, description: description, detection_source: 'rule' };
@@ -294,9 +284,19 @@
       if (key) remediations[key] = rem;
     });
 
-    var aiCount = (payload.summary && payload.summary.ai_suggested) || 0;
+    var summary = payload.summary || {};
+    var permGraph = (viz.permission_graph && viz.permission_graph.nodes) ? viz.permission_graph : null;
 
-    return { findings: findings, techniques: techniques, risks: risks, queue: queue, remediations: remediations, aiCount: aiCount };
+    return {
+      findings: findings, techniques: techniques, risks: risks, queue: queue,
+      remediations: remediations,
+      aiCount: summary.ai_suggested || 0,
+      graphCount: summary.graph_detected || 0,
+      escalationPaths: summary.escalation_paths || 0,
+      permGraph: permGraph,
+      source: summary.source || 'static',
+      accountId: summary.account_id || null
+    };
   }
 
   /* ---------------- rendering ---------------- */
@@ -572,6 +572,7 @@
     if (graph || state.view !== 'graph') return;
     graph = window.WinnowScenes.createGraph($('graph-canvas'), {
       theme: state.theme,
+      permissionGraph: state.data.permGraph,
       findings: state.data.findings,
       groups: state.groups,
       techniques: state.data.techniques,
@@ -678,30 +679,58 @@
 
   /* ---------------- analysis ---------------- */
 
-  function analyze() {
-    $('status-text').textContent = 'Analyzing…';
-    fetch(API, {
+  function applyResult(payload) {
+    state.data = normalise(payload);
+    state.selId = null;
+    var d = state.data;
+    var engine = d.aiCount ? 'graph + rule + AI' : 'graph + rule engine';
+    var prefix = d.source === 'live' && d.accountId ? ('AWS ' + d.accountId + ' · ') : (engine + ' · ');
+    $('status-text').textContent = prefix + d.findings.length + ' findings · ' + d.escalationPaths + ' escalation paths';
+    renderAll();
+    remountGraph();
+  }
+
+  function fallbackOffline(msg) {
+    state.data = normalise(null);
+    state.selId = null;
+    $('status-text').textContent = msg || 'Demo dataset · offline';
+    renderAll();
+    remountGraph();
+  }
+
+  function postJSON(path, body) {
+    return fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      /* app.py reads data['iam_config'] and data['config_type']; it never
-         reads a 'config' key, so we do not send one. */
-      body: JSON.stringify({ iam_config: DEMO_CONFIG, config_type: 'terraform' })
-    })
-      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-      .then(function (payload) {
-        state.data = normalise(payload);
-        state.selId = null;
-        $('status-text').textContent = (state.data.aiCount ? 'Rule engine + AI · ' : 'Rule engine · ') + state.data.findings.length + ' findings';
-        renderAll();
-        remountGraph();
-      })
-      .catch(function () {
-        state.data = DEMO_RESULT;
-        state.selId = null;
-        $('status-text').textContent = 'Demo dataset · offline';
-        renderAll();
-        remountGraph();
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.error) { var e = new Error(j.error || ('http ' + r.status)); e.handled = true; throw e; }
+        return j;
       });
+    });
+  }
+
+  /* Load the built-in demo: ask the backend for the config, then analyze it —
+     the backend is the single source of truth for the demo scenario. */
+  function analyze() {
+    $('status-text').textContent = 'Analyzing…';
+    postJSON('/api/generate-dummy')
+      .then(function (j) { return postJSON(API, { iam_config: j.iam_config, config_type: 'terraform' }); })
+      .then(applyResult)
+      .catch(function () { fallbackOffline('Demo dataset · offline'); });
+  }
+
+  function scanAccount() {
+    $('status-text').textContent = 'Scanning AWS account…';
+    var btn = document.getElementById('scan-aws');
+    if (btn) btn.disabled = true;
+    postJSON('/api/scan-account')
+      .then(applyResult)
+      .catch(function (err) {
+        $('status-text').textContent = 'AWS scan: ' + (err && err.message ? err.message : 'failed');
+      })
+      .then(function () { if (btn) btn.disabled = false; });
   }
 
   /* ---------------- events ---------------- */
@@ -727,6 +756,7 @@
     if (e.target.id === 'palette-backdrop') { closePalette(); return; }
     if (e.target.closest('#theme-toggle')) { state.theme = state.theme === 'dark' ? 'light' : 'dark'; applyTheme(); return; }
     if (e.target.closest('#reanalyze')) { analyze(); return; }
+    if (e.target.closest('#scan-aws')) { scanAccount(); return; }
     if (e.target.closest('#reset-cam')) { if (graph) graph.resetCamera(); return; }
     if (e.target.closest('#copy-policy')) {
       navigator.clipboard.writeText($('hardened-policy').textContent);

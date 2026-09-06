@@ -1,7 +1,5 @@
 # IAM Remediation Assistant
 
-
-
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
 [![Anthropic](https://img.shields.io/badge/Claude-Haiku-CC785C?logo=anthropic&logoColor=white)](https://anthropic.com)
@@ -13,10 +11,14 @@
 
 The **IAM Remediation Assistant** is a full-stack security tool that:
 
-1. **Analyzes** AWS IAM configurations (Terraform plans, JSON policies, `iam-vulnerable` output)
-2. **Detects** 31+ privilege escalation patterns mapped to MITRE ATT&CK techniques
-3. **Remediates** using Anthropic Claude AI for specific, actionable fixes with hardened policy examples
-4. **Visualizes** attack graphs, escalation chains, MITRE heatmaps, and resource risk maps
+1. **Ingests** IAM from a pasted config (Terraform plan, `iam-vulnerable` export, raw
+   policy JSON) **or a live AWS account scan** (read-only, one API call)
+2. **Detects** privilege escalation by building a real permission graph
+   (identities · policies · trust relationships) and walking 21 escalation
+   techniques over it, plus a supplementary rule scan — mapped to MITRE ATT&CK
+3. **Remediates** with Anthropic Claude for specific, actionable fixes and hardened
+   policy examples (falls back to a deterministic rule engine with no API key)
+4. **Visualizes** the permission graph, escalation chains, MITRE heatmap, and resource risk
 
 ---
 
@@ -24,43 +26,48 @@ The **IAM Remediation Assistant** is a full-stack security tool that:
 
 ```mermaid
 flowchart TB
-    subgraph browser["Browser — frontend/ · vanilla JS + D3 + Chart.js"]
+    subgraph browser["Browser — frontend/ · vanilla JS + three.js + Chart.js"]
         direction LR
-        ui["Dashboard (index.html + script.js)<br/>attack graph · findings table · charts"]
-        demo["'Load Demo Data'<br/>auto-runs on first load"]
+        ui["Dashboard (index.html + script.js + scenes.js)<br/>permission graph · findings · remediation · charts"]
+        demo["'Load Demo' / 'Scan AWS Account'"]
     end
 
     subgraph backend["Flask backend :5000 — app.py serves the UI and the API"]
         direction TB
-        api["POST /api/analyze<br/>POST /api/generate-dummy"]
-        analyzer["IAMAnalyzer — rule engine<br/>~20 escalation patterns → MITRE ATT&CK"]
-        detector["AIDetector<br/>optional second pass, then dedupe"]
-        remediator["Remediator<br/>cache · AI max 5 / request · rule fallback"]
-        visualizer["Visualizer<br/>attack graph · escalation chains · MITRE heatmap"]
-        api --> analyzer --> detector --> remediator --> visualizer
+        api["POST /api/analyze  (pasted config)<br/>POST /api/scan-account  (live, read-only)"]
+        ingest["iam_ingest — config / GAAD → IAMData"]
+        grapheng["iam_graph — GraphBuilder → PolicyEvaluator → escalation<br/>21 techniques over the permission graph · FP filters"]
+        rules["iam_analyzer.scan_iamdata — supplementary rule scan"]
+        detector["ai_detector — optional Claude second pass"]
+        remediator["remediator — cache · AI max 5/req · rule fallback"]
+        visualizer["visualizer — permission graph + heatmap + timeline"]
+        api --> ingest --> grapheng --> remediator --> visualizer
+        ingest --> rules --> remediator
     end
 
+    aws[["AWS IAM (read-only)<br/>iam:GetAccountAuthorizationDetails<br/>sts:GetCallerIdentity"]]
     claude[["Anthropic Claude API<br/>claude-3-haiku-20240307"]]
-    note>"Claude is optional — with no ANTHROPIC_API_KEY the tool runs the rule engine only.<br/>No live AWS calls: IAM configs are pasted or generated, never fetched from an account."]
+    note>"Both external calls are optional. No key ⇒ graph + rule engine only.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
 
     demo -->|"POST"| api
-    ui -->|"fetch — iam_config + config_type"| api
     visualizer -->|"response JSON — findings + remediations + visualization + summary"| ui
-    detector -.->|"prompt"| claude
+    api -.->|"boto3, read-only"| aws
+    detector -.-> claude
     remediator -.->|"uncached calls"| claude
     claude -.- note
 
     classDef external stroke:#8957e5,stroke-width:2px
     classDef muted stroke:#3fb950,stroke-width:1px,stroke-dasharray:5 3
-    class claude external
+    class aws,claude external
     class note muted
 ```
 
-Everything runs in one Flask process: `/api/generate-dummy` returns a hard-coded
-vulnerable config and `/api/analyze` runs the full pipeline in-process. With no
-`ANTHROPIC_API_KEY` the AI passes are skipped and the deterministic rule engine
-still produces every finding, remediation, and visualization — so the tool is
-fully explorable with just `pip install -r backend/requirements.txt`.
+Everything runs in one Flask process. `/api/analyze` takes a pasted config;
+`/api/scan-account` pulls the caller's live account with **two read-only AWS calls**
+and nothing else. Both feed the same pipeline: build a permission graph → walk the
+escalation techniques → merge a supplementary rule scan → (optionally) a Claude
+pass → remediate → visualize. With no `ANTHROPIC_API_KEY` the AI passes are skipped
+and the deterministic engine still produces every finding, remediation, and graph.
 
 ---
 
@@ -70,7 +77,7 @@ fully explorable with just `pip install -r backend/requirements.txt`.
 
 - Python 3.10+
 - (Optional) Anthropic API key ([get one here](https://console.anthropic.com/)) for AI-assisted detection and remediation
-- (Optional) AWS account for `iam-vulnerable` integration
+- (Optional) AWS credentials with two read-only permissions, to scan a live account — see [Scan a live AWS account](#scan-a-live-aws-account)
 
 ### Installation
 
@@ -99,7 +106,8 @@ Open http://localhost:5000 in your browser.
 
 ### Using Demo Data
 
-Click **"Load Demo Data"** in the UI to instantly see the tool in action with realistic vulnerable IAM configurations.
+Click **"Load Demo"** to analyze a bundled scenario, or **"Scan AWS Account"** to
+analyze the account your credentials point at (read-only — see below).
 
 ---
 
@@ -108,34 +116,57 @@ Click **"Load Demo Data"** in the UI to instantly see the tool in action with re
 ```
 Winnow-1.1/
 ├── backend/
-│   ├── app.py              # Flask app: routing, security headers, orchestration
-│   ├── iam_analyzer.py     # Parse IAM configs, detect escalation patterns
-│   ├── ai_detector.py      # Optional AI second pass for missed findings
-│   ├── remediator.py       # Remediation engine (rule-based + optional Claude)
-│   ├── visualizer.py       # Generate D3.js / Chart.js visualization data
-│   ├── tests/              # Unit + integration tests
+│   ├── app.py              # Flask: routing, security headers, _run_pipeline, /api/scan-account
+│   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
+│   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
+│   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
+│   ├── graph_builder.py    # identities/policies → nodes; trust/membership → edges; FP filter
+│   ├── policy_evaluator.py # policy statements → effective (Allow) permissions
+│   ├── escalation.py       # 21 escalation techniques, BFS over the graph
+│   ├── iam_graph.py        # orchestrates build → evaluate → detect → GraphOutput
+│   ├── graph_to_findings.py# escalation paths → Winnow Vulnerability dicts
+│   ├── iam_analyzer.py     # supplementary rule scan + generate_dummy_data
+│   ├── ai_detector.py      # optional Claude second pass for missed findings
+│   ├── remediator.py       # remediation engine (rule-based + optional Claude)
+│   ├── visualizer.py       # permission graph + heatmap + timeline payloads
+│   ├── tests/              # unit + integration tests (+ tests/fixtures/*.json)
 │   ├── requirements.txt    # Python dependencies
-│   └── .env.example        # Environment template
+│   └── .env.example        # environment template
 ├── frontend/
-│   ├── index.html          # Single-page dashboard
-│   ├── style.css           # Dark/light theme, responsive design
-│   └── script.js           # API calls, D3 force graph, Chart.js
+│   ├── index.html          # single-page dashboard
+│   ├── style.css           # dark/light theme, responsive
+│   ├── scenes.js           # three.js hero object + 3D permission graph
+│   └── script.js           # API calls, view model, Chart.js
 ├── README.md
 └── .gitignore
 ```
+
+The graph engine (`iam_model` / `iam_ingest` / `graph_builder` / `policy_evaluator`
+/ `escalation` / `iam_graph`) is ported from the companion project
+[`adnannazirahmed/IAM-Visualizer`](https://github.com/adnannazirahmed/IAM-Visualizer).
 
 ---
 
 ## 🏛️ Design Notes
 
-**Analyzer ↔ remediator contract.** Every finding carries a stable
-`pattern_id` (e.g. `iam:PassRole`, `full_admin`, `service_wildcard`).
-The remediator maps those IDs to strategies, so display titles can be
-reworded without breaking remediation. A test enforces that every analyzer
-pattern has a corresponding strategy.
+**Detection ↔ remediator contract.** Every finding carries a stable `pattern_id`
+(e.g. `iam:PassRole`, `full_admin`, `service_wildcard`). Graph escalation
+techniques map onto the same `pattern_id` space via
+`graph_to_findings.TECHNIQUE_MAP`. The remediator maps those IDs to strategies, so
+display titles can be reworded without breaking remediation — and tests enforce
+that every rule pattern *and* every escalation technique has a strategy.
 
-**Stateless analysis.** Finding IDs are assigned per request, so the same
-input always produces the same IDs across processes and Gunicorn workers.
+**Graph before rules.** Detection is primarily a real permission graph: identities
+and policies are nodes; `has_policy` / `member_of` / `can_assume` (parsed from trust
+policies) are edges. A BFS from every *reachable* identity checks 21 escalation
+techniques against that hop's effective permissions. Two false-positive filters are
+built in: roles only assumable by an AWS service principal are not start points, and
+Allows scoped only to `aws-service-role/*` don't count. `iam_analyzer.scan_iamdata`
+adds a flat per-policy scan on top; findings are tagged `graph` / `rule` / `ai`.
+
+**Stateless analysis.** Finding IDs are assigned per request (sorted by severity
+then resource), so the same input always produces the same IDs across processes
+and Gunicorn workers. Escalation-path IDs are `<identity>::<technique>`, not random.
 
 **Bounded AI usage.** The AI remediation pass is capped
 (`MAX_AI_REMEDIATIONS`, default 5 uncached calls per analysis) and cached by
@@ -226,9 +257,40 @@ IAM_VULNERABLE_ACCOUNT_ID=123456789012
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/analyze` | Analyze an IAM config; returns findings, remediations, visualization data |
-| `POST` | `/api/generate-dummy` | Return a realistic vulnerable demo config |
+| `POST` | `/api/analyze` | Analyze a pasted IAM config; returns findings, remediations, visualization |
+| `POST` | `/api/scan-account` | Scan the caller's live AWS account (read-only) and analyze it |
+| `POST` | `/api/generate-dummy` | Return the bundled demo config |
 | `GET`  | `/health` | Liveness probe |
+
+### Scan a live AWS account
+
+`POST /api/scan-account` (the **"Scan AWS Account"** button) pulls the account your
+credentials point at and runs it through the same pipeline as a pasted config. The
+backend makes **exactly two AWS calls, both read-only** — it never calls a mutating
+IAM API:
+
+- `iam:GetAccountAuthorizationDetails` — every user, role, group, and customer-managed policy
+- `sts:GetCallerIdentity` — the account ID (cosmetic)
+
+Minimal IAM policy for the credentials you scan with:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["iam:GetAccountAuthorizationDetails", "sts:GetCallerIdentity"],
+    "Resource": "*"
+  }]
+}
+```
+
+Credentials resolve through the standard boto3 chain — set `AWS_PROFILE`, or
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`), before
+starting the app. With no credentials the scan returns a clean `400` and pasted
+configs keep working. AWS-managed policy bodies (`arn:aws:iam::aws:policy/*`) are
+not included in `GetAccountAuthorizationDetails`, so their permissions are not
+visible to the graph engine — a known limitation.
 
 ### Running Tests
 
@@ -241,10 +303,10 @@ python -m unittest discover -s tests -t .
 
 The analyzer accepts:
 
-1. **Terraform Plan JSON** — Output from `terraform show -json`
-2. **IAM Policy JSON** — Raw policy documents with `Policy` key
-3. **iam-vulnerable Output** — Resources from Bishop Fox tool
-4. **Generic JSON** — Any structure with policy statements
+1. **Live AWS account** — via `POST /api/scan-account` (see above)
+2. **Terraform Plan JSON** — output from `terraform show -json`, or `{ "resources": [...] }`
+3. **iam-vulnerable Output** — resources from the Bishop Fox tool
+4. **Raw IAM Policy JSON** — `{ "Policy": {...} }` or a bare `{ "Version": ..., "Statement": [...] }`
 
 ---
 

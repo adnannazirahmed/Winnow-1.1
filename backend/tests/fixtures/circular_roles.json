@@ -1,0 +1,38 @@
+{
+  "RoleDetailList": [
+    {
+      "RoleName": "RoleA",
+      "Arn": "arn:aws:iam::123:role/RoleA",
+      "AssumeRolePolicyDocument": {
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Principal": {
+              "AWS": "arn:aws:iam::123:role/RoleB"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "RoleName": "RoleB",
+      "Arn": "arn:aws:iam::123:role/RoleB",
+      "AssumeRolePolicyDocument": {
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Principal": {
+              "AWS": "arn:aws:iam::123:role/RoleA"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

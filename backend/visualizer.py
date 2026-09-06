@@ -26,12 +26,13 @@ class Visualizer:
         'T1611': {'name': 'Escape to Host', 'tactic': 'Privilege Escalation'},
     }
 
-    def generate(self, remediation_results: List[Dict]) -> Dict:
+    def generate(self, remediation_results: List[Dict], permission_graph=None) -> Dict:
         vulnerabilities = [r['vulnerability'] for r in remediation_results]
         remediations = [r['remediation'] for r in remediation_results]
 
         return {
             'attack_graph': self._build_attack_graph(vulnerabilities),
+            'permission_graph': self._normalize_permission_graph(permission_graph),
             'severity_distribution': self._get_severity_distribution(vulnerabilities),
             'resource_risk_map': self._get_resource_risk_map(vulnerabilities),
             'remediation_timeline': self._get_remediation_timeline(remediations),
@@ -39,6 +40,18 @@ class Visualizer:
             'privilege_escalation_chains': self._get_escalation_chains(vulnerabilities),
             'summary_stats': self._get_summary_stats(vulnerabilities, remediations)
         }
+
+    @staticmethod
+    def _normalize_permission_graph(permission_graph) -> Dict:
+        """The real IAM permission graph (identities/roles/groups/policies +
+        can_assume/has_policy/member_of edges + escalation paths), from the graph
+        engine. Empty scaffold when analysis had no identities."""
+        empty = {'metadata': {}, 'nodes': [], 'links': [], 'escalation_paths': []}
+        if permission_graph is None:
+            return empty
+        if hasattr(permission_graph, 'model_dump'):
+            return permission_graph.model_dump(mode='json')
+        return permission_graph if isinstance(permission_graph, dict) else empty
 
     def _rank(self, severity: str) -> int:
         return self.SEVERITY_RANK.get(severity, 2)

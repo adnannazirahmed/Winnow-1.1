@@ -41,6 +41,16 @@ PATTERN_STRATEGY = {
     'full_admin': 'full_admin',
     'service_wildcard': 'service_wildcard',
     'attached_managed_policy': 'managed_policy_review',
+    # Additional pattern_ids emitted by the graph escalation engine
+    # (graph_to_findings.TECHNIQUE_MAP). Every escalation technique must map here.
+    'iam:AttachGroupPolicy': 'attach_policy',
+    'iam:PutGroupPolicy': 'put_policy',
+    'iam:AddUserToGroup': 'attach_policy',
+    'iam:CreateLoginProfile': 'login_profile',
+    'glue:UpdateDevEndpoint': 'service_escalation',
+    'sagemaker:CreateNotebookInstance': 'service_escalation',
+    'ssm:StartSession': 'service_escalation',
+    'escalation_path': 'generic',
 }
 
 

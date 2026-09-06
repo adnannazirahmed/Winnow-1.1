@@ -1,0 +1,40 @@
+{
+  "UserDetailList": [
+    {
+      "UserName": "AdminUser",
+      "Arn": "arn:aws:iam::123:user/AdminUser",
+      "UserPolicyList": [
+        {
+          "PolicyName": "Admin",
+          "PolicyDocument": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": "*",
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "UserName": "IAMAdmin",
+      "Arn": "arn:aws:iam::123:user/IAMAdmin",
+      "UserPolicyList": [
+        {
+          "PolicyName": "IAMAdmin",
+          "PolicyDocument": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": "iam:*",
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

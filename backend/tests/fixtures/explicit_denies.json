@@ -1,0 +1,35 @@
+{
+  "UserDetailList": [
+    {
+      "UserName": "ConflictedUser",
+      "Arn": "arn:aws:iam::123:user/ConflictedUser",
+      "UserPolicyList": [
+        {
+          "PolicyName": "AllowAndDeny",
+          "PolicyDocument": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              },
+              {
+                "Effect": "Deny",
+                "Action": [
+                  "s3:*"
+                ],
+                "Resource": [
+                  "*"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
