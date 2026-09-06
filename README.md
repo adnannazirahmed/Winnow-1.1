@@ -1,6 +1,6 @@
 # IAM Remediation Assistant
 
-> **Capstone Project** — AI-powered AWS IAM vulnerability detection, remediation, and visualization tool. Built on top of Bishop Fox's `iam-vulnerable` for realistic privilege escalation scenarios.
+
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
