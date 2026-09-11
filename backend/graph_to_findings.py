@@ -123,6 +123,12 @@ def graph_to_findings(graph_output: GraphOutput) -> List[Dict]:
             f"Technique: {esc.technique}",
             f"Requires: {', '.join(perms)}",
         ]
+        permission_evidence = [
+            item for item in esc.matched_permissions
+            if item.get("evidence_type") == "permission"
+        ]
+        primary = permission_evidence[0] if permission_evidence else {}
+        original_statement = primary.get("source_statement") or {}
         findings.append({
             "id": "",
             "pattern_id": meta["pattern_id"],
@@ -135,7 +141,9 @@ def graph_to_findings(graph_output: GraphOutput) -> List[Dict]:
             "resource_name": ident_name,
             "policy_document": {
                 "action": perms[0] if perms else "",
-                "statement": {"Effect": "Allow", "Action": perms, "Resource": "*"},
+                "statement": original_statement,
+                "source_policy": primary.get("source_policy", ""),
+                "matched_permissions": list(esc.matched_permissions),
                 "escalation": True,
                 "technique": esc.technique,
                 "required_permissions": perms,
@@ -144,5 +152,7 @@ def graph_to_findings(graph_output: GraphOutput) -> List[Dict]:
             "mitre_techniques": list(meta["mitre"]),
             "remediation_hint": meta["hint"],
             "detection_source": "graph",
+            "decision": esc.decision,
+            "unknowns": list(esc.unknowns),
         })
     return findings

@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+import copy
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
@@ -45,7 +46,7 @@ PATTERN_STRATEGY = {
     # (graph_to_findings.TECHNIQUE_MAP). Every escalation technique must map here.
     'iam:AttachGroupPolicy': 'attach_policy',
     'iam:PutGroupPolicy': 'put_policy',
-    'iam:AddUserToGroup': 'attach_policy',
+    'iam:AddUserToGroup': 'group_membership',
     'iam:CreateLoginProfile': 'login_profile',
     'glue:UpdateDevEndpoint': 'service_escalation',
     'sagemaker:CreateNotebookInstance': 'service_escalation',
@@ -148,6 +149,7 @@ Provide remediation as JSON with this structure:
                 result = self._get_ai_remediation(vuln)
             else:
                 result = self._get_fallback_remediation(vuln)
+            result = self._decorate_result(result, vuln)
             self._cache_put(vuln, result)
             results.append(result)
         return results
@@ -160,6 +162,7 @@ Provide remediation as JSON with this structure:
             result = self._get_ai_remediation(vulnerability)
         else:
             result = self._get_fallback_remediation(vulnerability)
+        result = self._decorate_result(result, vulnerability)
         self._cache_put(vulnerability, result)
         return result
 
@@ -176,6 +179,8 @@ Provide remediation as JSON with this structure:
             vuln.get('severity', ''),
             action,
             pd.get('statement', {}),
+            vuln.get('resource_name', ''),
+            vuln.get('attack_path', []),
         ], sort_keys=True, default=str)
 
     def _cache_get(self, vuln: Dict) -> Optional[Dict]:
@@ -190,7 +195,7 @@ Provide remediation as JSON with this structure:
 
     def _bind(self, cached: Dict, vuln: Dict) -> Dict:
         """Re-bind a cached remediation to this vulnerability's ID."""
-        bound = dict(cached)
+        bound = copy.deepcopy(cached)
         bound['vulnerability_id'] = vuln.get('id')
         return bound
 
@@ -306,6 +311,94 @@ Provide remediation as JSON with this structure:
             'source': 'rule'
         }
 
+    def _decorate_result(self, result: Dict, vulnerability: Dict) -> Dict:
+        """Attach the original/proposed review contract used by the workbench."""
+        decorated = copy.deepcopy(result)
+        policy_doc = vulnerability.get('policy_document', {})
+        original_statement = policy_doc.get('statement') if isinstance(policy_doc, dict) else None
+        original = (
+            {"Version": "2012-10-17", "Statement": [copy.deepcopy(original_statement)]}
+            if isinstance(original_statement, dict) and original_statement else {}
+        )
+        proposed = decorated.get('hardened_policy')
+        if not self._valid_policy_shape(proposed):
+            fallback = self._get_fallback_remediation(vulnerability)
+            fallback_policy = fallback.get('hardened_policy', {})
+            if self._valid_policy_shape(fallback_policy):
+                proposed = fallback_policy
+                decorated['hardened_policy'] = fallback_policy
+
+        strategy = self._strategy_for(vulnerability)
+        required_inputs = self._required_inputs(strategy, proposed)
+        structure_valid = self._valid_policy_shape(proposed)
+        conditions_preserved = self._conditions_preserved(original, proposed)
+        changed = bool(original and proposed and original != proposed)
+        export_ready = bool(
+            structure_valid and conditions_preserved and changed and not required_inputs
+        )
+        decorated['original_policy'] = original
+        decorated['required_inputs'] = required_inputs
+        decorated['validation'] = {
+            'status': ('ready' if export_ready else
+                       'requires_input' if proposed and required_inputs else
+                       'review_required' if proposed else 'no_proposal'),
+            'policy_structure': 'passed' if structure_valid else 'failed',
+            'conditions_preserved': conditions_preserved,
+            'change_present': changed,
+            'export_ready': export_ready,
+            'modeled_impact': 'not_run',
+            'note': 'No AWS change has been applied. Validate required workflow access before deployment.',
+        }
+        return decorated
+
+    @staticmethod
+    def _valid_policy_shape(policy: Any) -> bool:
+        if not isinstance(policy, dict):
+            return False
+        statements = policy.get('Statement')
+        if not isinstance(statements, list) or not statements:
+            return False
+        return all(
+            isinstance(stmt, dict)
+            and stmt.get('Effect') in ('Allow', 'Deny')
+            and ('Action' in stmt or 'NotAction' in stmt)
+            and ('Resource' in stmt or 'NotResource' in stmt)
+            for stmt in statements
+        )
+
+    @staticmethod
+    def _conditions_preserved(original: Dict, proposed: Dict) -> bool:
+        if not original:
+            return False
+        original_statements = original.get('Statement', [])
+        proposed_statements = proposed.get('Statement', []) if isinstance(proposed, dict) else []
+        if len(original_statements) != len(proposed_statements):
+            return False
+        return all(
+            not stmt.get('Condition')
+            or stmt.get('Condition') == proposed_statements[index].get('Condition')
+            or all(
+                proposed_statements[index].get('Condition', {}).get(op, {}).get(key) == value
+                for op, pairs in stmt.get('Condition', {}).items()
+                for key, value in pairs.items()
+            )
+            for index, stmt in enumerate(original_statements)
+        )
+
+    @staticmethod
+    def _required_inputs(strategy: str, proposed: Any) -> List[str]:
+        rendered = json.dumps(proposed, default=str)
+        inputs = []
+        if '<ACCOUNT_ID>' in rendered:
+            inputs.append('AWS account ID')
+        if '<ALLOWED_ROLE_NAME>' in rendered:
+            inputs.append('Allowed role name')
+        if '<PRIVILEGED_GROUP_NAME>' in rendered:
+            inputs.append('Approved group name')
+        if strategy in ('full_admin', 'service_wildcard'):
+            inputs.append('Observed required actions and resource ARNs')
+        return inputs
+
     def _generate_fallback_actions(self, strategy: str, severity: str) -> List[Dict]:
         actions: List[Dict] = []
 
@@ -316,7 +409,13 @@ Provide remediation as JSON with this structure:
                 'priority': 'CRITICAL',
                 'code_example': json.dumps({
                     "Before": {"Effect": "Allow", "Action": "iam:AttachUserPolicy", "Resource": "*"},
-                    "After": {"Effect": "Allow", "Action": "iam:AttachUserPolicy", "Resource": "arn:aws:iam::123456789012:policy/SpecificPolicy"}
+                    "After": {
+                        "Effect": "Allow", "Action": "iam:AttachUserPolicy",
+                        "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>",
+                        "Condition": {"ArnEquals": {
+                            "iam:PolicyARN": "arn:aws:iam::<ACCOUNT_ID>:policy/<APPROVED_POLICY_NAME>"
+                        }}
+                    }
                 }, indent=2),
                 'explanation': 'Wildcard attachment allows escalation to AdministratorAccess. Restrict to specific approved policies.'
             })
@@ -325,7 +424,7 @@ Provide remediation as JSON with this structure:
                 'description': 'Set a permissions boundary on the identity to limit maximum permissions regardless of attached policies.',
                 'priority': 'HIGH',
                 'code_example': json.dumps({
-                    "PermissionsBoundary": "arn:aws:iam::123456789012:policy/DeveloperBoundary"
+                    "PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/<BOUNDARY_POLICY_NAME>"
                 }, indent=2),
                 'explanation': 'Permissions boundaries provide a guardrail that cannot be bypassed by attaching policies.'
             })
@@ -342,6 +441,18 @@ Provide remediation as JSON with this structure:
                 'explanation': 'Inline policies cannot be centrally managed and are often used for stealthy privilege escalation.'
             })
 
+        elif strategy == 'group_membership':
+            actions.append({
+                'action': 'Restrict Group Membership Changes',
+                'description': 'Allow membership changes only for explicitly approved groups and administrators.',
+                'priority': 'HIGH',
+                'code_example': json.dumps({
+                    "Action": "iam:AddUserToGroup",
+                    "Resource": "arn:aws:iam::<ACCOUNT_ID>:group/<PRIVILEGED_GROUP_NAME>"
+                }, indent=2),
+                'explanation': 'Broad group membership changes can inherit privileged group policies.'
+            })
+
         elif strategy == 'policy_version':
             actions.append({
                 'action': 'Restrict Policy Versioning Actions',
@@ -349,7 +460,7 @@ Provide remediation as JSON with this structure:
                 'priority': 'HIGH',
                 'code_example': json.dumps({
                     "Before": {"Effect": "Allow", "Action": ["iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion"], "Resource": "*"},
-                    "After": {"Effect": "Allow", "Action": ["iam:CreatePolicyVersion"], "Resource": "arn:aws:iam::123456789012:policy/app-scoped-*"}
+                    "After": {"Effect": "Allow", "Action": ["iam:CreatePolicyVersion"], "Resource": "arn:aws:iam::<ACCOUNT_ID>:policy/<APPROVED_POLICY_NAME>"}
                 }, indent=2),
                 'explanation': 'Creating or activating a new policy version on a privileged policy grants arbitrary permissions.'
             })
@@ -364,7 +475,7 @@ Provide remediation as JSON with this structure:
                     "After": {
                         "Effect": "Allow",
                         "Action": "iam:CreateAccessKey",
-                        "Resource": "arn:aws:iam::123456789012:user/${aws:username}"
+                        "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}"
                     }
                 }, indent=2),
                 'explanation': 'Prevents creating access keys for other users (credential theft).'
@@ -377,7 +488,7 @@ Provide remediation as JSON with this structure:
                 'priority': 'HIGH',
                 'code_example': json.dumps({
                     "Before": {"Effect": "Allow", "Action": "iam:UpdateLoginProfile", "Resource": "*"},
-                    "After": {"Effect": "Allow", "Action": "iam:UpdateLoginProfile", "Resource": "arn:aws:iam::123456789012:user/${aws:username}"}
+                    "After": {"Effect": "Allow", "Action": "iam:UpdateLoginProfile", "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}"}
                 }, indent=2),
                 'explanation': 'Prevents account takeover by resetting other users\' passwords.'
             })
@@ -392,7 +503,7 @@ Provide remediation as JSON with this structure:
                     "After": {
                         "Effect": "Allow",
                         "Action": "sts:AssumeRole",
-                        "Resource": "arn:aws:iam::123456789012:role/AllowedRole*",
+                        "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>",
                         "Condition": {
                             "Bool": {"aws:MultiFactorAuthPresent": "true"},
                             "StringEquals": {"aws:RequestedRegion": "us-east-1"}
@@ -409,7 +520,11 @@ Provide remediation as JSON with this structure:
                 'priority': 'HIGH',
                 'code_example': json.dumps({
                     "Before": {"Effect": "Allow", "Action": "iam:PassRole", "Resource": "*"},
-                    "After": {"Effect": "Allow", "Action": "iam:PassRole", "Resource": "arn:aws:iam::123456789012:role/AppSpecificRole"}
+                    "After": {
+                        "Effect": "Allow", "Action": "iam:PassRole",
+                        "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>",
+                        "Condition": {"StringEquals": {"iam:PassedToService": "<APPROVED_SERVICE>"}}
+                    }
                 }, indent=2),
                 'explanation': 'Prevents passing privileged roles (e.g., AdminRole) to compute resources.'
             })
@@ -422,7 +537,7 @@ Provide remediation as JSON with this structure:
                 'code_example': json.dumps({
                     "Condition": {
                         "StringEquals": {
-                            "iam:PermissionsBoundary": "arn:aws:iam::123456789012:policy/RoleBoundary"
+                            "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/<BOUNDARY_POLICY_NAME>"
                         }
                     }
                 }, indent=2),
@@ -448,16 +563,19 @@ Provide remediation as JSON with this structure:
                 'priority': 'MEDIUM',
                 'code_example': json.dumps({
                     "Before": {"Effect": "Allow", "Action": ["lambda:CreateFunction", "iam:PassRole"], "Resource": "*"},
-                    "After": {
-                        "Effect": "Allow",
-                        "Action": "lambda:CreateFunction",
-                        "Resource": "*",
-                        "Condition": {
-                            "StringEquals": {
+                    "After": {"Statement": [
+                        {
+                            "Effect": "Allow", "Action": "lambda:CreateFunction",
+                            "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:<FUNCTION_PREFIX>*"
+                        },
+                        {
+                            "Effect": "Allow", "Action": "iam:PassRole",
+                            "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>",
+                            "Condition": {"StringEquals": {
                                 "iam:PassedToService": "lambda.amazonaws.com"
-                            }
+                            }}
                         }
-                    }
+                    ]}
                 }, indent=2),
                 'explanation': 'Prevents passing admin roles to Lambda/EC2/Glue for code execution escalation.'
             })
@@ -471,16 +589,8 @@ Provide remediation as JSON with this structure:
                     "Before": {"Effect": "Allow", "Action": "*", "Resource": "*"},
                     "After": {
                         "Effect": "Allow",
-                        "Action": [
-                            "s3:GetObject",
-                            "s3:PutObject",
-                            "dynamodb:GetItem",
-                            "dynamodb:PutItem"
-                        ],
-                        "Resource": [
-                            "arn:aws:s3:::my-bucket/*",
-                            "arn:aws:dynamodb:us-east-1:123456789012:table/my-table"
-                        ]
+                        "Action": ["<OBSERVED_REQUIRED_ACTIONS>"],
+                        "Resource": ["<APPROVED_RESOURCE_ARNS>"]
                     }
                 }, indent=2),
                 'explanation': 'Full admin access violates least privilege. Use IAM Access Analyzer to generate policies from CloudTrail.'
@@ -495,8 +605,8 @@ Provide remediation as JSON with this structure:
                     "Before": {"Effect": "Allow", "Action": "s3:*", "Resource": "*"},
                     "After": {
                         "Effect": "Allow",
-                        "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
-                        "Resource": ["arn:aws:s3:::my-app-bucket", "arn:aws:s3:::my-app-bucket/*"]
+                        "Action": ["<OBSERVED_REQUIRED_ACTIONS>"],
+                        "Resource": ["<APPROVED_RESOURCE_ARNS>"]
                     }
                 }, indent=2),
                 'explanation': 'A service wildcard silently grants every current and future action in that service, including newly released escalation paths.'
@@ -551,7 +661,7 @@ Provide remediation as JSON with this structure:
         }
 
     def _harden_statement(self, statement: Dict, strategy: str) -> Dict:
-        hardened = statement.copy()
+        hardened = copy.deepcopy(statement)
         actions = statement.get('Action', [])
         if isinstance(actions, str):
             actions = [actions]
@@ -566,52 +676,31 @@ Provide remediation as JSON with this structure:
                 hardened['Effect'] = 'Deny'
                 hardened['Action'] = actions
 
+        elif strategy == 'group_membership':
+            if '*' in resources:
+                hardened['Resource'] = [
+                    "arn:aws:iam::<ACCOUNT_ID>:group/<PRIVILEGED_GROUP_NAME>"
+                ]
+
         elif strategy == 'service_wildcard':
-            # Keep the service prefix but drop the blanket wildcard.
-            expanded = []
-            for a in actions:
-                if a.endswith(':*'):
-                    service = a[:-2]
-                    expanded.extend([f"{service}:Get*", f"{service}:List*", f"{service}:Describe*"])
-                else:
-                    expanded.append(a)
-            hardened['Action'] = expanded
+            # A safe exact allow-list requires usage evidence. Offer containment
+            # without inventing an account-specific permission set.
+            hardened['Effect'] = 'Deny'
 
         elif strategy in ('access_key', 'login_profile'):
             if '*' in resources:
-                hardened['Resource'] = ["arn:aws:iam::123456789012:user/${aws:username}"]
+                hardened['Resource'] = ["arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}"]
 
         elif strategy == 'assume_role':
             if '*' in resources:
-                hardened['Resource'] = ["arn:aws:iam::123456789012:role/AllowedRole*"]
-                hardened['Condition'] = {
-                    "Bool": {"aws:MultiFactorAuthPresent": "true"}
-                }
+                hardened['Resource'] = ["arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>"]
 
         elif strategy == 'pass_role':
             if '*' in resources:
-                hardened['Resource'] = ["arn:aws:iam::123456789012:role/AppSpecificRole"]
+                hardened['Resource'] = ["arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>"]
 
         elif strategy == 'full_admin':
-            hardened['Action'] = [
-                "s3:GetObject", "s3:PutObject", "s3:ListBucket",
-                "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query",
-                "logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"
-            ]
-            hardened['Resource'] = [
-                "arn:aws:s3:::my-app-bucket/*",
-                "arn:aws:dynamodb:us-east-1:123456789012:table/my-app-table",
-                "arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/my-function:*"
-            ]
-
-        # Add a region restriction as defense in depth (valid Condition form).
-        condition = hardened.get('Condition')
-        if not isinstance(condition, dict):
-            condition = {}
-        string_equals = condition.setdefault('StringEquals', {})
-        if isinstance(string_equals, dict):
-            string_equals.setdefault('aws:RequestedRegion', 'us-east-1')
-        hardened['Condition'] = condition
+            hardened['Effect'] = 'Deny'
 
         return hardened
 

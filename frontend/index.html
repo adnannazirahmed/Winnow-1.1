@@ -34,7 +34,7 @@
       </button>
       <div class="status-row">
         <span class="status-dot"></span>
-        <span class="status-text" id="status-text">Rule engine · ready</span>
+        <span class="status-text" id="status-text" role="status" aria-live="polite">Rule engine · ready</span>
         <button class="icon-btn" id="theme-toggle" title="Toggle theme"></button>
       </div>
     </div>
@@ -43,7 +43,7 @@
   <main class="main">
     <header class="topbar">
       <div>
-        <div class="eyebrow">Analysis · terraform plan</div>
+        <div class="eyebrow" id="source-eyebrow">Analysis · demo</div>
         <h1 id="view-title">Posture overview</h1>
       </div>
       <span class="spacer"></span>
@@ -52,14 +52,46 @@
         <span class="pill" id="stat-identities">5 identities</span>
         <span class="pill" id="stat-techniques">6 techniques</span>
       </div>
-      <button class="btn" id="scan-aws" title="Scan the caller's live AWS account (read-only: GetAccountAuthorizationDetails + GetCallerIdentity)">Scan AWS Account</button>
+      <button class="btn" id="scan-aws" title="Scan the caller's live AWS account (read-only: GetAccountAuthorizationDetails + GetCallerIdentity)">Scan AWS</button>
       <button class="btn btn-primary" id="reanalyze">Load Demo</button>
     </header>
+
+    <div class="analysis-context" id="analysis-context" role="status" aria-live="polite"></div>
 
     <div class="view-wrap">
 
       <!-- OVERVIEW -->
       <section class="view active" data-view="overview">
+        <div class="panel source-panel">
+          <div class="panel-head">
+            <div><span class="panel-title">Start an analysis</span><div class="panel-meta">Choose a source; results stay tied to this input</div></div>
+            <div class="source-tabs" role="tablist" aria-label="Analysis source">
+              <button class="chip" type="button" data-source-tab="demo" role="tab" aria-selected="true">Demo</button>
+              <button class="chip" type="button" data-source-tab="upload" role="tab" aria-selected="false">Upload or paste</button>
+              <button class="chip" type="button" data-source-tab="live" role="tab" aria-selected="false">AWS account</button>
+            </div>
+          </div>
+          <div class="source-body" id="source-demo" role="tabpanel">
+            <div><strong>Bundled IAM scenario</strong><p>Explore Winnow with local sample data. Demo results are always labeled.</p></div>
+            <button class="btn btn-primary" type="button" data-load-demo>Analyze demo</button>
+          </div>
+          <div class="source-body" id="source-upload" role="tabpanel" hidden>
+            <div class="upload-fields">
+              <label class="file-label" for="config-file">Terraform plan, resource export, or policy JSON</label>
+              <input id="config-file" class="file-input" type="file" accept=".json,application/json">
+              <label class="file-label" for="config-input">Or paste JSON</label>
+              <textarea id="config-input" rows="7" spellcheck="false" placeholder="Paste the JSON document here"></textarea>
+            </div>
+            <div class="source-actions"><span class="hint" id="upload-detail">Nothing selected</span><button class="btn btn-primary" id="analyze-upload" type="button">Analyze input</button></div>
+          </div>
+          <div class="source-body" id="source-live" role="tabpanel" hidden>
+            <div><strong>Read-only AWS inventory</strong><p>Uses the server's credential chain to read IAM authorization details and the account ID. It never calls a mutating AWS API.</p></div>
+            <button class="btn btn-primary" type="button" data-scan-aws>Scan connected account</button>
+          </div>
+          <div class="source-message" id="source-message" role="alert" hidden></div>
+        </div>
+
+        <div class="result-state" id="result-state" hidden></div>
         <div class="grid-hero">
           <div class="hero">
             <div class="hero-canvas" id="hero-canvas"></div>
@@ -105,9 +137,9 @@
         <div class="graph-layout">
           <div class="graph-stage">
             <div class="graph-canvas" id="graph-canvas"></div>
-            <div class="graph-cols"><span>IDENTITIES</span><span>FINDINGS</span><span>MITRE ATT&amp;CK</span></div>
+            <div class="graph-cols"><span>RESOURCES</span><span>FINDINGS</span><span>MITRE ATT&amp;CK</span></div>
             <div class="legend">
-              <span><i class="swatch box"></i>Identity</span>
+              <span><i class="swatch box"></i>Resource</span>
               <span><i class="swatch" style="background:var(--n-crit)"></i>Critical</span>
               <span><i class="swatch" style="background:var(--n-high)"></i>High</span>
               <span><i class="swatch" style="background:var(--n-med)"></i>Medium</span>
@@ -127,7 +159,7 @@
             <div class="gd-tools">
               <div class="search-field">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-                <input type="text" id="gd-search" placeholder="Filter by identity, id, finding, technique">
+                <input type="text" id="gd-search" aria-label="Filter graph breakdown" placeholder="Filter by resource, id, finding, technique">
               </div>
               <div class="gd-sev-filters" id="gd-sev-filters"></div>
             </div>
@@ -141,7 +173,7 @@
         <div class="filters">
           <div class="search-field">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-            <input type="text" id="finding-search" placeholder="Filter by title, id, resource, technique">
+            <input type="text" id="finding-search" aria-label="Filter findings" placeholder="Filter by title, id, resource, technique">
           </div>
           <div class="filters" id="sev-filters"></div>
           <span class="spacer"></span>
@@ -157,23 +189,33 @@
         </div>
       </section>
 
-      <!-- REMEDIATION -->
+      <!-- REMEDIATION WORKBENCH -->
       <section class="view" data-view="remediation">
         <div class="rem-layout">
           <div class="rem-col">
             <div class="panel rem-header" id="rem-header"></div>
             <div class="rem-col" id="rem-actions"></div>
-            <div class="panel">
+            <div class="panel policy-workbench">
               <div class="panel-head">
-                <span class="panel-title">Hardened policy</span>
-                <button class="btn btn-sm" id="copy-policy">Copy</button>
+                <span class="panel-title">Policy change</span>
+                <div class="policy-tabs" role="tablist" aria-label="Policy version">
+                  <button class="chip" type="button" data-policy-view="original" role="tab" aria-selected="false">Original</button>
+                  <button class="chip" type="button" data-policy-view="proposed" role="tab" aria-selected="true">Proposed</button>
+                  <button class="chip" type="button" data-policy-view="diff" role="tab" aria-selected="false">Diff</button>
+                </div>
               </div>
-              <div class="code" style="border:0;border-radius:0"><pre id="hardened-policy"></pre></div>
+              <div class="code policy-code"><pre id="policy-code"></pre></div>
+              <div class="policy-footer"><span class="hint" id="policy-caption"></span><button class="btn btn-sm" id="copy-policy">Copy visible policy</button></div>
+            </div>
+            <div class="panel validation-panel">
+              <div class="panel-head"><span class="panel-title">Proposal checks</span><span class="tag" id="validation-status">Review required</span></div>
+              <div class="panel-body" id="validation-checks"></div>
+              <div class="policy-footer"><span class="hint">Local model only; no AWS change is applied.</span><button class="btn btn-sm" id="validate-proposal">Review checks</button></div>
             </div>
           </div>
           <div class="rem-col">
             <div class="panel" style="padding:16px">
-              <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--n-mute);margin-bottom:10px">Compliance</div>
+              <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--n-mute);margin-bottom:10px">Compliance mappings</div>
               <div class="checklist" id="compliance"></div>
             </div>
             <div class="panel" style="padding:16px">
@@ -184,14 +226,30 @@
         </div>
       </section>
 
-      <!-- VISUALIZER -->
+      <!-- EVIDENCE-FIRST PATH EXPLORER -->
       <section class="view" data-view="visualizer">
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-head"><span class="panel-title">Escalation chains</span><span class="panel-meta" id="chain-count">3 identities</span></div>
-            <div class="panel-body" id="chains" style="gap:14px"></div>
+        <div class="path-layout">
+          <div class="panel path-list-panel">
+            <div class="panel-head"><span class="panel-title">Candidate paths</span><span class="panel-meta" id="chain-count">0 paths</span></div>
+            <div class="path-list" id="chains"></div>
           </div>
-          <div class="rem-col">
+          <div class="rem-col path-main">
+            <div class="panel path-stage">
+              <div class="panel-head"><div><span class="panel-title" id="path-title">Select a path</span><div class="panel-meta" id="path-subtitle"></div></div><span class="tag" id="path-decision">Unknown</span></div>
+              <div class="path-nodes" id="path-nodes"></div>
+            </div>
+            <div class="grid-2 evidence-grid">
+              <div class="panel">
+                <div class="panel-head"><span class="panel-title">Matched evidence</span><span class="panel-meta" id="evidence-source"></span></div>
+                <div class="code evidence-code"><pre id="evidence-code"></pre></div>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><span class="panel-title">Preconditions and limits</span></div>
+                <div class="panel-body" id="path-unknowns"></div>
+              </div>
+            </div>
+          </div>
+          <div class="rem-col path-side">
             <div class="panel">
               <div class="panel-head"><span class="panel-title">MITRE ATT&amp;CK coverage</span><span class="panel-meta" id="tech-count">6 techniques</span></div>
               <div class="panel-body" id="heatmap" style="gap:13px"></div>
@@ -230,7 +288,7 @@
   <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
     <div class="palette-input">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-      <input type="text" id="palette-input" placeholder="Jump to a view, finding, or technique" autocomplete="off">
+      <input type="text" id="palette-input" aria-label="Command palette search" placeholder="Jump to a view, finding, or technique" autocomplete="off">
       <span class="kbd">esc</span>
     </div>
     <div class="palette-results" id="palette-results"></div>

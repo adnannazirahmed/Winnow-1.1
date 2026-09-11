@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from iam_model import (
     IAMData, IAMUser, IAMRole, IAMGroup, IAMPolicy,
     PolicyDocument, PolicyStatement, PolicyEffect, PolicyCondition,
-    ManagedPolicyAttachment,
+    ManagedPolicyAttachment, AnalysisCoverage,
 )
 
 logger = logging.getLogger(__name__)
@@ -237,6 +237,18 @@ _PARSER = IAMParser()
 def parse_gaad(raw_data: Dict[str, Any], account_id: str = "000000000000") -> IAMData:
     iam_data = _PARSER.parse(raw_data)
     iam_data.account_id = account_id
+    iam_data.coverage = AnalysisCoverage(
+        input_format="aws_account_authorization_details",
+        total_resources=sum(len(raw_data.get(key, [])) for key in (
+            "UserDetailList", "GroupDetailList", "RoleDetailList", "Policies"
+        )),
+        iam_resources=(len(iam_data.users) + len(iam_data.groups)
+                       + len(iam_data.roles) + len(iam_data.policies)),
+        conditions_present=_has_conditions(iam_data),
+        warnings=[
+            "Organization SCPs, session policies, and runtime request context are not included"
+        ],
+    )
     return iam_data
 
 
@@ -254,6 +266,11 @@ _IDENTITY_RESOURCE_TYPES = {
     "aws_iam_role": "role",
     "aws_iam_user": "user",
     "aws_iam_group": "group",
+}
+_ATTACHMENT_RESOURCE_TYPES = {
+    "aws_iam_role_policy_attachment": "role",
+    "aws_iam_user_policy_attachment": "user",
+    "aws_iam_group_policy_attachment": "group",
 }
 
 
@@ -286,32 +303,73 @@ def _inline_from_values(values: Dict[str, Any]) -> List[IAMPolicy]:
     return out
 
 
+def _collect_module_resources(module: Any) -> List[Dict[str, Any]]:
+    if not isinstance(module, dict):
+        return []
+    resources = [r for r in module.get("resources", []) if isinstance(r, dict)]
+    for child in module.get("child_modules", []) or []:
+        resources.extend(_collect_module_resources(child))
+    return resources
+
+
+def _has_conditions(iam_data: IAMData) -> bool:
+    policies = list(iam_data.policies)
+    for entities in (iam_data.users, iam_data.roles, iam_data.groups):
+        for entity in entities:
+            policies.extend(entity.inline_policies)
+            if isinstance(entity, IAMRole):
+                policies.append(IAMPolicy(
+                    policy_name=f"{entity.role_name}-trust", arn="",
+                    document=entity.assume_role_policy_document,
+                ))
+    return any(stmt.conditions for policy in policies for stmt in policy.document.statements)
+
+
+def _attach_policy(model: Any, policy_arn: str) -> None:
+    if not model or not policy_arn:
+        return
+    attachment = ManagedPolicyAttachment(
+        policy_name=_arn_to_name(policy_arn), policy_arn=policy_arn
+    )
+    if attachment not in model.attached_managed_policies:
+        model.attached_managed_policies.append(attachment)
+
+
 def config_to_iamdata(config: Any, config_type: str = "terraform") -> IAMData:
     if isinstance(config, str):
         config = json.loads(config)
     if not isinstance(config, dict):
         raise ValueError("IAM config must be a JSON object")
 
+    root_module = config.get("planned_values", {}).get("root_module")
+    is_terraform_plan = isinstance(root_module, dict)
+
     # Raw policy document — no identities, just a policy to scan.
-    if "resources" not in config:
+    if "resources" not in config and not is_terraform_plan:
         doc = config.get("Policy") or (config if "Statement" in config else None)
         if doc is None:
-            return IAMData()
+            raise ValueError("Unsupported IAM input: expected a policy, resources, or Terraform plan")
         name = config.get("ResourceName", "PastedPolicy")
-        return IAMData(policies=[IAMPolicy(
+        result = IAMData(policies=[IAMPolicy(
             policy_name=name, arn=f"inline-policy/{name}",
             document=_PARSER.parse_policy_document(doc),
         )])
+        result.coverage = AnalysisCoverage(
+            input_format="raw_policy", total_resources=1, iam_resources=1,
+            conditions_present=_has_conditions(result),
+            warnings=["No identity attachments, trust policies, boundaries, or organization policies were supplied"],
+        )
+        return result
 
     resources = config.get("resources")
-    if not resources:
-        resources = (config.get("planned_values", {})
-                     .get("root_module", {})
-                     .get("resources", []))
+    if not isinstance(resources, list) or (is_terraform_plan and not resources):
+        resources = _collect_module_resources(root_module)
 
     iam_data = IAMData()
     identities: Dict[str, Any] = {}  # f"{kind}:{name}" -> model
 
+    unsupported_iam = []
+    boundary_count = 0
     for resource in resources:
         rtype = resource.get("type")
         values = resource.get("values", resource)
@@ -349,6 +407,15 @@ def config_to_iamdata(config: Any, config_type: str = "terraform") -> IAMData:
                 )
                 iam_data.groups.append(model)
             identities[f"{kind}:{name}"] = model
+            if values.get("permissions_boundary"):
+                boundary_count += 1
+        elif isinstance(rtype, str) and rtype.startswith("aws_iam_") and (
+            rtype not in _INLINE_POLICY_RESOURCE_TYPES
+            and rtype not in _ATTACHMENT_RESOURCE_TYPES
+            and rtype not in {"aws_iam_policy_attachment", "aws_iam_group_membership",
+                              "aws_iam_user_group_membership"}
+        ):
+            unsupported_iam.append(rtype)
 
     # Second pass: standalone inline-policy resources (aws_iam_role_policy, ...)
     for resource in resources:
@@ -368,5 +435,57 @@ def config_to_iamdata(config: Any, config_type: str = "terraform") -> IAMData:
             model.inline_policies.append(pol)
         else:
             iam_data.policies.append(pol)
+
+    # Third pass: managed-policy attachments and group membership resources.
+    for resource in resources:
+        rtype = resource.get("type")
+        values = resource.get("values", resource)
+        if rtype in _ATTACHMENT_RESOURCE_TYPES:
+            kind = _ATTACHMENT_RESOURCE_TYPES[rtype]
+            target = values.get(kind)
+            _attach_policy(identities.get(f"{kind}:{target}"), values.get("policy_arn", ""))
+        elif rtype == "aws_iam_policy_attachment":
+            policy_arn = values.get("policy_arn", "")
+            for kind, plural in (("user", "users"), ("role", "roles"), ("group", "groups")):
+                for target in values.get(plural, []) or []:
+                    _attach_policy(identities.get(f"{kind}:{target}"), policy_arn)
+        elif rtype == "aws_iam_group_membership":
+            group = values.get("group")
+            for user_name in values.get("users", []) or []:
+                user = identities.get(f"user:{user_name}")
+                if user and group and group not in user.group_list:
+                    user.group_list.append(group)
+        elif rtype == "aws_iam_user_group_membership":
+            user = identities.get(f"user:{values.get('user')}")
+            if user:
+                for group in values.get("groups", []) or []:
+                    if group not in user.group_list:
+                        user.group_list.append(group)
+
+    warnings = []
+    if not resources:
+        warnings.append("The Terraform plan contains no resources")
+    if unsupported_iam:
+        warnings.append("Unsupported IAM resources: " + ", ".join(sorted(set(unsupported_iam))))
+    if boundary_count:
+        warnings.append(
+            f"{boundary_count} permissions boundary reference(s) were found; boundary policy evaluation is not yet included"
+        )
+    warnings.append("Organization SCPs, session policies, and runtime request context are not included")
+    recognized = (
+        len(iam_data.users) + len(iam_data.roles) + len(iam_data.groups)
+        + len(iam_data.policies)
+    )
+    if resources and not recognized:
+        warnings.append("No supported IAM identities or policies were found")
+    iam_data.coverage = AnalysisCoverage(
+        input_format="terraform_plan" if is_terraform_plan else "resource_export",
+        total_resources=len(resources),
+        iam_resources=recognized,
+        skipped_resources=len(unsupported_iam),
+        conditions_present=_has_conditions(iam_data),
+        complete=not unsupported_iam and bool(recognized),
+        warnings=warnings,
+    )
 
     return iam_data

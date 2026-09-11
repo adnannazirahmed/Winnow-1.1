@@ -81,11 +81,11 @@ def _merge_findings(graph_findings, rule_findings):
     return merged
 
 
-def _run_pipeline(iam_data, source='static'):
+def _run_pipeline(iam_data, source='static', source_name=None):
     """IAMData -> permission graph -> merged findings -> AI pass -> remediation ->
     visualization. Returns the JSON body shared by /api/analyze and /api/scan-account."""
     graph_output = iam_graph.process_iam_data(iam_data)
-    graph_output.metadata.source = 'live' if source == 'live' else 'static'
+    graph_output.metadata.source = source
     graph_output.metadata.account_id = iam_data.account_id
 
     static_vulnerabilities = _merge_findings(
@@ -133,7 +133,16 @@ def _run_pipeline(iam_data, source='static'):
             'graph_detected': len([v for v in vulnerabilities if v.get('detection_source') == 'graph']),
             'escalation_paths': graph_output.metadata.escalation_count,
             'source': graph_output.metadata.source,
+            'source_name': source_name,
             'account_id': iam_data.account_id,
+            'identity_count': len(iam_data.users) + len(iam_data.roles) + len(iam_data.groups),
+            'policy_count': len(iam_data.policies) + sum(
+                len(entity.inline_policies)
+                for entities in (iam_data.users, iam_data.roles, iam_data.groups)
+                for entity in entities
+            ),
+            'coverage': iam_data.coverage.model_dump(mode='json'),
+            'ai_status': 'enabled' if ai_detector.enabled else 'disabled',
         },
     }
 
@@ -156,17 +165,21 @@ def serve_static(path):
 def analyze():
     try:
         data = request.get_json(silent=True)
-        if not data or 'iam_config' not in data:
+        if not isinstance(data, dict) or 'iam_config' not in data:
             return jsonify({'error': 'Missing iam_config in request'}), 400
 
         iam_config = data['iam_config']
         config_type = data.get('config_type', 'terraform')
+        source = data.get('source', 'upload')
+        if source not in ('upload', 'demo', 'static'):
+            source = 'upload'
+        source_name = str(data.get('source_name') or '')[:160] or None
 
         iam_data = iam_ingest.config_to_iamdata(iam_config, config_type)
-        return jsonify(_run_pipeline(iam_data, source='static'))
+        return jsonify(_run_pipeline(iam_data, source=source, source_name=source_name))
     except ValueError as e:
         logger.warning(f"Invalid analyze request: {e}")
-        return jsonify({'error': 'Invalid IAM configuration format'}), 400
+        return jsonify({'error': str(e)[:240] or 'Invalid IAM configuration format'}), 400
     except Exception:
         logger.exception("Analysis error")
         return jsonify({'error': 'Internal server error during analysis'}), 500

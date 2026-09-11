@@ -14,8 +14,17 @@ from iam_model import (
     RelationshipType, RiskLevel, GraphMetadata, PolicyEffect, IAMRole,
 )
 from policy_evaluator import PolicyEvaluator
+from policy_evaluator import statement_to_dict
 
 CYCLE_DETECTION_NODE_LIMIT = 400
+
+
+def inline_policy_node_id(owner_type: str, owner_name: str, policy_name: str) -> str:
+    return f"policy::inline::{owner_type}::{owner_name}::{policy_name}"
+
+
+def managed_policy_node_id(policy_name: str) -> str:
+    return f"policy::{policy_name}"
 
 
 class GraphBuilder:
@@ -98,7 +107,7 @@ class GraphBuilder:
     def _add_policies(self):
         for policy in self.iam_data.policies:
             self._add_node(GraphNode(
-                id=f"policy::{policy.policy_name}", type=NodeType.POLICY,
+                id=managed_policy_node_id(policy.policy_name), type=NodeType.POLICY,
                 name=policy.policy_name, arn=policy.arn,
             ))
 
@@ -111,41 +120,58 @@ class GraphBuilder:
                     self._add_link(GraphLink(source=user_id, target=group_id,
                                              relationship=RelationshipType.MEMBER_OF))
             for inline in user.inline_policies:
-                inline_id = f"policy::{inline.policy_name}"
+                inline_id = inline_policy_node_id("user", user.user_name, inline.policy_name)
                 self._add_node(GraphNode(id=inline_id, type=NodeType.POLICY,
                                          name=inline.policy_name, arn=inline.arn))
                 self._add_link(GraphLink(source=user_id, target=inline_id,
                                          relationship=RelationshipType.HAS_POLICY))
             for att in user.attached_managed_policies:
-                self._add_link(GraphLink(source=user_id, target=f"policy::{att.policy_name}",
+                target_id = managed_policy_node_id(att.policy_name)
+                if target_id not in self.nodes_dict:
+                    self._add_node(GraphNode(id=target_id, type=NodeType.POLICY,
+                                             name=att.policy_name, arn=att.policy_arn,
+                                             reachable=False))
+                self._add_link(GraphLink(source=user_id, target=target_id,
                                          relationship=RelationshipType.HAS_POLICY))
 
         for group in self.iam_data.groups:
             group_id = f"group::{group.group_name}"
             for inline in group.inline_policies:
-                inline_id = f"policy::{inline.policy_name}"
+                inline_id = inline_policy_node_id("group", group.group_name, inline.policy_name)
                 self._add_node(GraphNode(id=inline_id, type=NodeType.POLICY,
                                          name=inline.policy_name, arn=inline.arn))
                 self._add_link(GraphLink(source=group_id, target=inline_id,
                                          relationship=RelationshipType.HAS_POLICY))
             for att in group.attached_managed_policies:
-                self._add_link(GraphLink(source=group_id, target=f"policy::{att.policy_name}",
+                target_id = managed_policy_node_id(att.policy_name)
+                if target_id not in self.nodes_dict:
+                    self._add_node(GraphNode(id=target_id, type=NodeType.POLICY,
+                                             name=att.policy_name, arn=att.policy_arn,
+                                             reachable=False))
+                self._add_link(GraphLink(source=group_id, target=target_id,
                                          relationship=RelationshipType.HAS_POLICY))
 
         for role in self.iam_data.roles:
             role_id = f"role::{role.role_name}"
             for inline in role.inline_policies:
-                inline_id = f"policy::{inline.policy_name}"
+                inline_id = inline_policy_node_id("role", role.role_name, inline.policy_name)
                 self._add_node(GraphNode(id=inline_id, type=NodeType.POLICY,
                                          name=inline.policy_name, arn=inline.arn))
                 self._add_link(GraphLink(source=role_id, target=inline_id,
                                          relationship=RelationshipType.HAS_POLICY))
             for att in role.attached_managed_policies:
-                self._add_link(GraphLink(source=role_id, target=f"policy::{att.policy_name}",
+                target_id = managed_policy_node_id(att.policy_name)
+                if target_id not in self.nodes_dict:
+                    self._add_node(GraphNode(id=target_id, type=NodeType.POLICY,
+                                             name=att.policy_name, arn=att.policy_arn,
+                                             reachable=False))
+                self._add_link(GraphLink(source=role_id, target=target_id,
                                          relationship=RelationshipType.HAS_POLICY))
 
             for stmt in role.assume_role_policy_document.statements:
-                if stmt.effect != PolicyEffect.ALLOW or "sts:AssumeRole" not in stmt.actions:
+                if stmt.effect != PolicyEffect.ALLOW or not any(
+                    action.lower() == "sts:assumerole" for action in stmt.actions
+                ):
                     continue
                 for principal in stmt.principals:
                     if ":user/" in principal:
@@ -156,7 +182,14 @@ class GraphBuilder:
                         source_id = None
                     if source_id and source_id in self.nodes_dict:
                         self._add_link(GraphLink(source=source_id, target=role_id,
-                                                 relationship=RelationshipType.CAN_ASSUME))
+                                                 relationship=RelationshipType.CAN_ASSUME,
+                                                 label="trusted by role",
+                                                 evidence=statement_to_dict(stmt),
+                                                 decision="candidate" if stmt.conditions else "allowed",
+                                                 unknowns=(
+                                                     ["Role trust conditions require request context"]
+                                                     if stmt.conditions else []
+                                                 )))
 
     def _detect_cycles(self):
         if self.graph.number_of_nodes() > CYCLE_DETECTION_NODE_LIMIT:

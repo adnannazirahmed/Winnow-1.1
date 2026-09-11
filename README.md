@@ -11,14 +11,17 @@
 
 The **IAM Remediation Assistant** is a full-stack security tool that:
 
-1. **Ingests** IAM from a pasted config (Terraform plan, `iam-vulnerable` export, raw
-   policy JSON) **or a live AWS account scan** (read-only, one API call)
-2. **Detects** privilege escalation by building a real permission graph
-   (identities · policies · trust relationships) and walking 21 escalation
-   techniques over it, plus a supplementary rule scan — mapped to MITRE ATT&CK
-3. **Remediates** with Anthropic Claude for specific, actionable fixes and hardened
-   policy examples (falls back to a deterministic rule engine with no API key)
-4. **Visualizes** the permission graph, escalation chains, MITRE heatmap, and resource risk
+1. **Ingests** IAM from an uploaded or pasted Terraform plan, `iam-vulnerable`
+   export, raw policy JSON, or a live AWS account scan, and reports what the input
+   did and did not contain.
+2. **Detects** privilege escalation from effective permissions, explicit denies,
+   trust relationships, resource scope, and retained source statements across 21
+   techniques, plus a supplementary rule scan mapped to MITRE ATT&CK.
+3. **Explains** every detected path with the matched policy evidence, decision
+   status, and any conditions or missing context that still need human review.
+4. **Remediates** in a reviewable policy workbench with Original, Proposed, and
+   Diff views, required inputs, and structural validation. Claude is optional;
+   without a key the deterministic engine remains available.
 
 ---
 
@@ -28,8 +31,8 @@ The **IAM Remediation Assistant** is a full-stack security tool that:
 flowchart TB
     subgraph browser["Browser — frontend/ · vanilla JS + three.js + Chart.js"]
         direction LR
-        ui["Dashboard (index.html + script.js + scenes.js)<br/>permission graph · findings · remediation · charts"]
-        demo["'Load Demo' / 'Scan AWS Account'"]
+        ui["Analysis workspace (index.html + script.js + scenes.js)<br/>source coverage · permission graph · evidence paths · policy workbench"]
+        sources["Demo / upload or paste / read-only AWS scan"]
     end
 
     subgraph backend["Flask backend :5000 — app.py serves the UI and the API"]
@@ -49,7 +52,7 @@ flowchart TB
     claude[["Anthropic Claude API<br/>claude-3-haiku-20240307"]]
     note>"Both external calls are optional. No key ⇒ graph + rule engine only.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
 
-    demo -->|"POST"| api
+    sources -->|"POST"| api
     visualizer -->|"response JSON — findings + remediations + visualization + summary"| ui
     api -.->|"boto3, read-only"| aws
     detector -.-> claude
@@ -62,12 +65,14 @@ flowchart TB
     class note muted
 ```
 
-Everything runs in one Flask process. `/api/analyze` takes a pasted config;
+Everything runs in one Flask process. `/api/analyze` takes an uploaded or pasted config;
 `/api/scan-account` pulls the caller's live account with **two read-only AWS calls**
 and nothing else. Both feed the same pipeline: build a permission graph → walk the
 escalation techniques → merge a supplementary rule scan → (optionally) a Claude
 pass → remediate → visualize. With no `ANTHROPIC_API_KEY` the AI passes are skipped
 and the deterministic engine still produces every finding, remediation, and graph.
+The response includes source metadata and coverage warnings so an empty result is
+shown as an empty result instead of being replaced by sample data.
 
 ---
 
@@ -106,8 +111,8 @@ Open http://localhost:5000 in your browser.
 
 ### Using Demo Data
 
-Click **"Load Demo"** to analyze a bundled scenario, or **"Scan AWS Account"** to
-analyze the account your credentials point at (read-only — see below).
+Use the source selector on **Overview** to load the bundled scenario, upload or
+paste JSON, or scan the account your credentials point at (read-only — see below).
 
 ---
 
@@ -121,8 +126,8 @@ Winnow-1.1/
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
 │   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
 │   ├── graph_builder.py    # identities/policies → nodes; trust/membership → edges; FP filter
-│   ├── policy_evaluator.py # policy statements → effective (Allow) permissions
-│   ├── escalation.py       # 21 escalation techniques, BFS over the graph
+│   ├── policy_evaluator.py # Allow/Deny, wildcards, exclusions, conditions → effective permissions
+│   ├── escalation.py       # 21 techniques with matched evidence and decision status
 │   ├── iam_graph.py        # orchestrates build → evaluate → detect → GraphOutput
 │   ├── graph_to_findings.py# escalation paths → Winnow Vulnerability dicts
 │   ├── iam_analyzer.py     # supplementary rule scan + generate_dummy_data
@@ -156,13 +161,27 @@ techniques map onto the same `pattern_id` space via
 display titles can be reworded without breaking remediation — and tests enforce
 that every rule pattern *and* every escalation technique has a strategy.
 
-**Graph before rules.** Detection is primarily a real permission graph: identities
-and policies are nodes; `has_policy` / `member_of` / `can_assume` (parsed from trust
-policies) are edges. A BFS from every *reachable* identity checks 21 escalation
-techniques against that hop's effective permissions. Two false-positive filters are
-built in: roles only assumable by an AWS service principal are not start points, and
-Allows scoped only to `aws-service-role/*` don't count. `iam_analyzer.scan_iamdata`
-adds a flat per-policy scan on top; findings are tagged `graph` / `rule` / `ai`.
+**Graph before rules.** Detection is primarily a permission graph: identities and
+policies are nodes; `has_policy`, `member_of`, and `can_assume` relationships are
+edges. User permissions include group policies while retaining user-level explicit
+denies. The evaluator handles case-insensitive IAM action matching, wildcard scope,
+`NotAction` / `NotResource` exclusions, and conditions. It follows trust edges only
+when the source can assume the role and has no covering explicit deny. Conditional
+matches are labeled as candidates and keep the original statement and unknown
+runtime context for review. `iam_analyzer.scan_iamdata` adds a flat per-policy scan;
+findings are tagged `graph`, `rule`, or `ai`.
+
+**Coverage is part of the result.** Every analysis reports its detected input
+format, total and imported IAM resources, skipped resources, condition presence,
+and warnings for context the input cannot prove, such as permissions boundaries or
+organization/session policies. Unsupported JSON is rejected with an actionable
+error, and a valid input with no findings stays empty in the interface.
+
+**Remediations are proposals.** The workbench shows the retained source statement
+beside the proposed policy and a compact diff. It verifies policy structure and
+condition preservation, lists placeholders that must be supplied, and clearly
+states that no AWS change has been applied. The review control records only a local
+review state; the application does not mutate IAM.
 
 **Stateless analysis.** Finding IDs are assigned per request (sorted by severity
 then resource), so the same input always produces the same IDs across processes
@@ -209,10 +228,11 @@ response.
 
 | Tab | Description |
 |-----|-------------|
-| **Attack Graph** | Force-directed D3 graph showing identities → vulnerabilities → MITRE techniques |
-| **Vulnerabilities** | Sortable, filterable table with all detected issues |
-| **Remediation** | AI-generated fixes with before/after policy JSON, priority, compliance notes |
-| **Visualizer** | Escalation chains, MITRE heatmap, resource risk bars, remediation timeline |
+| **Overview** | Source selector, coverage, result state, risk summary, and resource table |
+| **Permissions** | Interactive permission graph with identity, policy, and trust relationships |
+| **Findings** | Sortable, filterable table with every detected issue |
+| **Policy workbench** | Original, Proposed, and Diff views with inputs and validation |
+| **Path explorer** | Detected and conditional paths with matched policy evidence and preconditions |
 | **Charts** | Severity doughnut, resource risk radar, remediation progress |
 
 ---

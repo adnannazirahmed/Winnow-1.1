@@ -15,10 +15,10 @@ The two false-positive filters are preserved verbatim:
 """
 
 import collections
-import re
 from typing import Dict, List
 
 from iam_model import RiskLevel, EscalationPath, EffectivePermission, PolicyEffect, RelationshipType
+from policy_evaluator import PolicyEvaluator
 
 
 class EscalationRule:
@@ -58,26 +58,63 @@ _RISK_SCORE = {
     RiskLevel.LOW: 0.25, RiskLevel.NONE: 0.0,
 }
 
-SERVICE_LINKED_ROLE_RESOURCE = re.compile(
-    r"^arn:aws:iam::[^:]*:role/aws-service-role/", re.IGNORECASE
-)
-
-
 def action_matches(allowed_action: str, target_action: str) -> bool:
-    regex = "^" + allowed_action.replace("*", ".*").replace("?", ".") + "$"
-    return bool(re.match(regex, target_action, re.IGNORECASE))
+    return PolicyEvaluator.matches_action(allowed_action, target_action)
+
+
+def _action_applies(permission: EffectivePermission, target_action: str) -> bool:
+    if not action_matches(permission.action, target_action):
+        return False
+    return not any(action_matches(pattern, target_action) for pattern in permission.excluded_actions)
+
+
+def _resource_applies(permission: EffectivePermission, target_resource: str = "*") -> bool:
+    if target_resource == "*":
+        return True
+    if not PolicyEvaluator.matches_resource(permission.resource, target_resource):
+        return False
+    return not any(
+        PolicyEvaluator.matches_resource(pattern, target_resource)
+        for pattern in permission.excluded_resources
+    )
+
+
+def is_explicitly_denied(
+    eff_perms: List[EffectivePermission], target_action: str, target_resource: str = "*"
+) -> bool:
+    return any(
+        permission.effect == PolicyEffect.DENY
+        and not permission.conditional
+        and _action_applies(permission, target_action)
+        and (
+            _resource_applies(permission, target_resource)
+            if target_resource != "*"
+            else permission.resource == "*" and not permission.excluded_resources
+        )
+        for permission in eff_perms
+    )
+
+
+def matching_permission(
+    eff_perms: List[EffectivePermission], target_action: str, target_resource: str = "*"
+):
+    if is_explicitly_denied(eff_perms, target_action, target_resource):
+        return None
+    for permission in eff_perms:
+        if permission.effect != PolicyEffect.ALLOW:
+            continue
+        if not _action_applies(permission, target_action):
+            continue
+        if not _resource_applies(permission, target_resource):
+            continue
+        if permission.resource.lower().startswith("arn:aws:iam::") and ":role/aws-service-role/" in permission.resource.lower():
+            continue
+        return permission
+    return None
 
 
 def has_permission(eff_perms: List[EffectivePermission], target_action: str) -> bool:
-    for p in eff_perms:
-        if p.effect == PolicyEffect.DENY and action_matches(p.action, target_action):
-            return False
-    for p in eff_perms:
-        if p.effect == PolicyEffect.ALLOW and action_matches(p.action, target_action):
-            if SERVICE_LINKED_ROLE_RESOURCE.match(p.resource):
-                continue
-            return True
-    return False
+    return matching_permission(eff_perms, target_action) is not None
 
 
 def get_risk_score(risk: RiskLevel) -> float:
@@ -89,8 +126,12 @@ def detect_escalation_paths(graph, effective_permissions_map: Dict[str, List[Eff
 
     adj = collections.defaultdict(list)
     for link in graph.links:
-        if link.relationship in (RelationshipType.CAN_ASSUME, RelationshipType.MEMBER_OF):
+        # Group policies are already folded into each user's permission set. Walking
+        # into a group here would lose user-level Denies and create false paths.
+        if link.relationship == RelationshipType.CAN_ASSUME:
             adj[link.source].append(link.target)
+
+    links_by_pair = {(link.source, link.target): link for link in graph.links}
 
     paths: List[EscalationPath] = []
     seen = set()  # (start_id, technique) — emit each once, shortest path wins
@@ -111,8 +152,27 @@ def detect_escalation_paths(graph, effective_permissions_map: Dict[str, List[Eff
                 key = (start_id, rule.name)
                 if key in seen:
                     continue
-                if not all(any(has_permission(perms, act) for act in group) for group in rule.required):
+                matched = []
+                for alternatives in rule.required:
+                    selected = next(
+                        ((action, matching_permission(perms, action)) for action in alternatives
+                         if matching_permission(perms, action) is not None),
+                        None,
+                    )
+                    if selected is None:
+                        matched = []
+                        break
+                    matched.append(selected)
+                if not matched:
                     continue
+
+                # Self-scoped credential actions are still worth review, but they are
+                # not cross-identity privilege escalation paths.
+                if rule.name in {"CreateUserAccessKey", "CreateLoginProfile", "UpdateLoginProfile"}:
+                    if start_node.arn and all(
+                        permission.resource == start_node.arn for _, permission in matched
+                    ):
+                        continue
                 seen.add(key)
 
                 rule_score = get_risk_score(rule.risk)
@@ -122,14 +182,51 @@ def detect_escalation_paths(graph, effective_permissions_map: Dict[str, List[Eff
 
                 esc_id = f"{start_id}::{rule.name}"
                 start_node.escalation_paths.append(esc_id)
+                evidence = []
+                unknowns = []
+                for action, permission in matched:
+                    item = permission.model_dump(mode="json")
+                    item["matched_action"] = action
+                    item["evidence_type"] = "permission"
+                    evidence.append(item)
+                    if permission.conditional:
+                        unknowns.append(f"Conditions on {action} require request context")
+                    conditional_denies = [
+                        deny for deny in perms
+                        if deny.effect == PolicyEffect.DENY and deny.conditional
+                        and _action_applies(deny, action)
+                    ]
+                    if conditional_denies:
+                        unknowns.append(f"A conditional Deny may apply to {action}")
+                        evidence.extend([
+                            dict(deny.model_dump(mode="json"), matched_action=action,
+                                 evidence_type="conditional_deny")
+                            for deny in conditional_denies
+                        ])
+                for source, target in zip(path_so_far, path_so_far[1:]):
+                    link = links_by_pair.get((source, target))
+                    if link:
+                        evidence.append({
+                            "evidence_type": "relationship",
+                            "source": source,
+                            "target": target,
+                            "relationship": link.relationship.value,
+                            "statement": link.evidence,
+                        })
+                        unknowns.extend(link.unknowns)
+                unknowns = list(dict.fromkeys(unknowns))
+
                 paths.append(EscalationPath(
                     id=esc_id,
                     technique=rule.name,
                     risk=rule.risk,
                     path=path_so_far,
-                    required_permissions=[a for grp in rule.required for a in grp],
+                    required_permissions=[action for action, _ in matched],
                     description=rule.description,
                     affected_identity=start_id,
+                    decision="candidate" if unknowns else "allowed",
+                    matched_permissions=evidence,
+                    unknowns=unknowns,
                 ))
 
             for nxt in adj[curr_id]:

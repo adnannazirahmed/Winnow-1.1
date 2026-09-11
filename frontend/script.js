@@ -99,29 +99,44 @@
     aiCount: 0
   };
 
+  DEMO_RESULT.source = 'offline-demo';
+  DEMO_RESULT.sourceName = 'Bundled offline sample';
+  DEMO_RESULT.accountId = null;
+  DEMO_RESULT.identityCount = 5;
+  DEMO_RESULT.policyCount = 3;
+  DEMO_RESULT.escalationPaths = 0;
+  DEMO_RESULT.paths = [];
+  DEMO_RESULT.permGraph = null;
+  DEMO_RESULT.coverage = {
+    input_format: 'offline_demo', complete: true, total_resources: 0,
+    iam_resources: 0, skipped_resources: 0,
+    warnings: ['Backend unavailable; showing the bundled offline sample.']
+  };
+  DEMO_RESULT.aiStatus = 'disabled';
+
   /* Offline-only remediation copy. When the API answers, the backend's own
      Remediator output is used instead of this table. */
   var STRATEGY_ACTIONS = {
     attach_policy: [
       { name: 'Remove iam:AttachUserPolicy/AttachRolePolicy', priority: 'CRITICAL',
         description: 'Remove the ability to attach arbitrary managed policies. If attachment is needed, restrict to specific policy ARNs using condition keys.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: 'arn:aws:iam::123456789012:policy/SpecificPolicy' } },
+        code: { Before: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: 'arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>', Condition: { ArnEquals: { 'iam:PolicyARN': 'arn:aws:iam::<ACCOUNT_ID>:policy/<APPROVED_POLICY_NAME>' } } } },
         explanation: 'Wildcard attachment allows escalation to AdministratorAccess. Restrict to specific approved policies.' },
       { name: 'Apply Permissions Boundary', priority: 'HIGH',
         description: 'Set a permissions boundary on the identity to limit maximum permissions regardless of attached policies.',
-        code: { PermissionsBoundary: 'arn:aws:iam::123456789012:policy/DeveloperBoundary' },
+        code: { PermissionsBoundary: 'arn:aws:iam::<ACCOUNT_ID>:policy/<BOUNDARY_POLICY_NAME>' },
         explanation: 'Permissions boundaries provide a guardrail that cannot be bypassed by attaching policies.' }
     ],
     pass_role: [
       { name: 'Restrict iam:PassRole to Specific Roles', priority: 'HIGH',
         description: 'Limit which roles can be passed to services like EC2 and Lambda.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:PassRole', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:PassRole', Resource: 'arn:aws:iam::123456789012:role/AppSpecificRole' } },
+        code: { Before: { Effect: 'Allow', Action: 'iam:PassRole', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:PassRole', Resource: 'arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>', Condition: { StringEquals: { 'iam:PassedToService': '<APPROVED_SERVICE>' } } } },
         explanation: 'Prevents passing privileged roles (e.g. AdminRole) to compute resources.' }
     ],
     access_key: [
       { name: 'Restrict CreateAccessKey to Self', priority: 'HIGH',
         description: 'Add a condition so access keys can only be created for the calling user.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: 'arn:aws:iam::123456789012:user/${aws:username}' } },
+        code: { Before: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: 'arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}' } },
         explanation: 'Prevents creating access keys for other users (credential theft).' }
     ],
     managed_policy_review: [
@@ -158,7 +173,18 @@
     showMitre: true,
     spin: true,
     paletteOpen: false,
-    paletteIndex: 0
+    paletteIndex: 0,
+    sourceTab: 'demo',
+    analysisStatus: 'loading',
+    analysisError: '',
+    scanTime: null,
+    selectedPath: null,
+    selectedEvidence: 0,
+    policyView: 'proposed',
+    validationReviewed: false,
+    currentPolicy: null,
+    requestSerial: 0,
+    uploadedFileName: ''
   };
 
   var hero = null, graph = null;
@@ -168,10 +194,10 @@
     ['graph', 'Attack graph', ['M5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M19 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M12 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M8 6.5h8', 'M7.5 8l3 9', 'M16.5 8l-3 9']],
     ['findings', 'Findings', ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8']],
     ['remediation', 'Remediation', ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z']],
-    ['visualizer', 'Visualizer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
+    ['visualizer', 'Path explorer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
     ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']]
   ];
-  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Remediation plan', visualizer: 'Visualizer', charts: 'Charts' };
+  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', charts: 'Charts' };
 
   /* ---------------- helpers ---------------- */
 
@@ -205,7 +231,6 @@
   function normalise(payload) {
     if (!payload) return DEMO_RESULT;
     var raw = payload.vulnerabilities || [];
-    if (!raw.length) return DEMO_RESULT;
 
     var findings = raw.map(function (f) {
       var path = f.attack_path;
@@ -219,7 +244,11 @@
         /* attack_path arrives as an array of steps. */
         attack_path: Array.isArray(path) ? path.join(' → ') : (path || ''),
         description: f.description || '',
-        detection_source: f.detection_source || 'rule'
+        detection_source: f.detection_source || 'rule',
+        policy_document: f.policy_document || {},
+        decision: f.decision || 'allowed',
+        unknowns: f.unknowns || [],
+        technique: (f.policy_document && f.policy_document.technique) || ''
       };
     });
 
@@ -275,7 +304,6 @@
     var queue = items.map(function (i) {
       return [i.action || '', String(i.priority || 'MEDIUM').toUpperCase(), Number(i.estimated_hours) || 0];
     });
-    if (!queue.length) queue = DEMO_RESULT.queue;
 
     /* Index the real remediations by vulnerability id. */
     var remediations = {};
@@ -288,6 +316,7 @@
 
     var summary = payload.summary || {};
     var permGraph = (viz.permission_graph && viz.permission_graph.nodes) ? viz.permission_graph : null;
+    var paths = (permGraph && permGraph.escalation_paths) || [];
 
     return {
       findings: findings, techniques: techniques, risks: risks, queue: queue,
@@ -296,8 +325,14 @@
       graphCount: summary.graph_detected || 0,
       escalationPaths: summary.escalation_paths || 0,
       permGraph: permGraph,
-      source: summary.source || 'static',
-      accountId: summary.account_id || null
+      paths: paths,
+      source: summary.source || 'upload',
+      sourceName: summary.source_name || null,
+      accountId: summary.account_id || null,
+      identityCount: Number(summary.identity_count) || 0,
+      policyCount: Number(summary.policy_count) || 0,
+      coverage: summary.coverage || { complete: true, warnings: [] },
+      aiStatus: summary.ai_status || 'disabled'
     };
   }
 
@@ -308,6 +343,7 @@
       var id = n[0];
       var count = id === 'findings' ? state.data.findings.length
         : id === 'remediation' ? state.data.queue.length
+        : id === 'visualizer' ? state.data.escalationPaths
         : id === 'graph' ? '3D' : '';
       return '<button class="nav-item" data-goto="' + id + '"' + (state.view === id ? ' aria-current="page"' : '') + '>' +
         icon(n[2], 14) + '<span class="label">' + esc(n[1]) + '</span><span class="count">' + esc(count) + '</span></button>';
@@ -317,18 +353,87 @@
   function renderTopbar() {
     $('view-title').textContent = TITLES[state.view];
     $('stat-findings').textContent = state.data.findings.length + ' findings';
-    $('stat-identities').textContent = state.groups.length + ' identities';
-    $('stat-techniques').textContent = state.data.techniques.length + ' techniques';
+    $('stat-identities').textContent = state.data.identityCount + ' identities';
+    $('stat-techniques').textContent = state.data.escalationPaths + ' paths';
+    var sourceLabel = state.data.source === 'live' ? 'AWS account'
+      : state.data.source === 'demo' ? 'Demo'
+      : state.data.source === 'offline-demo' ? 'Offline demo' : 'Uploaded JSON';
+    $('source-eyebrow').textContent = 'Analysis · ' + sourceLabel;
+  }
+
+  function renderAnalysisContext() {
+    var d = state.data, coverage = d.coverage || {}, warnings = coverage.warnings || [];
+    var source = d.source === 'live' ? ('AWS ' + (d.accountId || 'account'))
+      : (d.sourceName || (d.source === 'demo' ? 'Bundled demo' : d.source === 'offline-demo' ? 'Bundled offline sample' : 'Uploaded JSON'));
+    var status = state.analysisStatus === 'loading' ? 'Analyzing'
+      : state.analysisStatus === 'error' ? 'Failed'
+      : !coverage.complete ? 'Partial coverage'
+      : d.findings.length ? 'Analysis complete' : 'No findings detected';
+    var time = state.scanTime ? state.scanTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    $('analysis-context').innerHTML =
+      '<span class="context-source">' + esc(source) + '</span>' +
+      '<span class="context-sep">·</span><span>' + esc(status) + '</span>' +
+      (time ? '<span class="context-sep">·</span><span>' + esc(time) + '</span>' : '') +
+      '<span class="context-sep">·</span><span>' + esc(d.identityCount) + ' identities</span>' +
+      '<span class="context-sep">·</span><span>' + esc(d.policyCount) + ' policies</span>' +
+      (warnings.length ? '<span class="context-warning">' + esc(warnings.length) + ' coverage note' + (warnings.length === 1 ? '' : 's') + '</span>' : '');
+  }
+
+  function renderSourcePanel() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-source-tab]'), function (button) {
+      var selected = button.getAttribute('data-source-tab') === state.sourceTab;
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    ['demo', 'upload', 'live'].forEach(function (name) {
+      $('source-' + name).hidden = name !== state.sourceTab;
+    });
+    var message = $('source-message');
+    message.hidden = !state.analysisError;
+    message.textContent = state.analysisError || '';
+  }
+
+  function renderResultState() {
+    var host = $('result-state');
+    var coverage = state.data.coverage || {}, warnings = coverage.warnings || [];
+    if (state.analysisStatus === 'loading') {
+      host.hidden = false;
+      host.className = 'result-state loading';
+      host.innerHTML = '<strong>Analyzing this source…</strong><span>Import, permission evaluation, paths, and remediation are running.</span>';
+      return;
+    }
+    if (state.analysisStatus === 'error') {
+      host.hidden = false;
+      host.className = 'result-state error';
+      host.innerHTML = '<strong>Analysis failed</strong><span>' + esc(state.analysisError) + '</span>';
+      return;
+    }
+    if (!state.data.findings.length || !coverage.complete || warnings.length) {
+      host.hidden = false;
+      host.className = 'result-state ' + (!coverage.complete ? 'warning' : 'success');
+      var title = !coverage.complete ? 'Analysis completed with coverage limits'
+        : !state.data.findings.length ? 'No findings detected within this scan’s coverage'
+        : 'Coverage notes apply to these results';
+      host.innerHTML = '<strong>' + esc(title) + '</strong>' +
+        '<span>' + esc(warnings.join(' · ') || 'The remediation queue is empty.') + '</span>';
+      return;
+    }
+    host.hidden = true;
   }
 
   function renderOverview() {
     var crit = countBy('CRITICAL'), high = countBy('HIGH'), med = countBy('MEDIUM'), low = countBy('LOW');
     var top = state.data.risks[0];
     var words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
-    $('hero-title').innerHTML = esc(words[crit] || crit) + ' critical<br>escalation paths';
+    var pathCount = state.data.escalationPaths;
+    $('hero-title').innerHTML = pathCount
+      ? esc(words[pathCount] || pathCount) + ' candidate<br>escalation path' + (pathCount === 1 ? '' : 's')
+      : 'No candidate<br>escalation paths';
     if (top) {
-      $('hero-note').textContent = top.name + ' alone carries ' + top.critical + ' critical findings.';
+      $('hero-note').textContent = top.name + ' carries ' + top.total + ' finding' + (top.total === 1 ? '' : 's') + '.';
       $('hero-risk').textContent = 'risk ' + top.score + '/100';
+    } else {
+      $('hero-note').textContent = state.analysisStatus === 'error' ? 'The current analysis did not complete.' : 'No risky resources were found in the supported input.';
+      $('hero-risk').textContent = 'no scored resources';
     }
     $('hero-actions').textContent = state.data.queue.length + ' actions · ' + totalHours() + 'h';
 
@@ -337,7 +442,7 @@
       ['High', high, 'compute escalation', 'var(--n-high)'],
       ['Medium', med, 'managed policies', 'var(--n-med)'],
       ['Low', low, low ? 'informational' : 'nothing benign', 'var(--n-low)'],
-      ['Identities', state.groups.length, 'policies · roles · users', 'var(--n-acc)'],
+      ['Identities', state.data.identityCount, 'users · roles · groups', 'var(--n-acc)'],
       ['Techniques', state.data.techniques.length, 'MITRE ATT&CK', 'var(--n-mute)']
     ];
     $('metrics').innerHTML = metrics.map(function (m) {
@@ -354,22 +459,29 @@
         '<i style="width:' + pc(r.medium) + ';background:var(--n-med)"></i>' +
         '<i style="width:' + pc(r.low) + ';background:var(--n-low)"></i>' +
         '</span><span class="risk-score">' + esc(r.score) + '/100</span></div>';
-    }).join('');
+    }).join('') || '<div class="empty-panel">No resource risk to display.</div>';
 
     $('top-findings').innerHTML = state.data.findings.filter(function (f) { return f.severity === 'CRITICAL'; }).slice(0, 6).map(function (f) {
       return '<button class="list-row" data-select="' + esc(f.id) + '" data-goto="remediation"><i class="dot" style="background:' + SEV_VAR[f.severity] + '"></i>' +
         '<span class="title">' + esc(f.title) + '</span><span class="meta">' + esc(f.resource) + '</span></button>';
-    }).join('');
+    }).join('') || '<div class="empty-panel">No findings in this analysis.</div>';
+    renderSourcePanel();
+    renderResultState();
+    renderAnalysisContext();
   }
 
   function renderInspector() {
     var f = findingById(state.selId);
-    if (!f) return;
+    if (!f) {
+      $('inspector').innerHTML = '<div class="empty-panel">No finding selected.</div>';
+      return;
+    }
     $('inspector').innerHTML =
       '<div class="eyebrow">Selected node</div>' +
       '<div class="head">' + esc(f.title) + '</div>' +
       '<div class="tag-row"><span class="tag" style="border-color:' + SEV_VAR[f.severity] + ';color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span>' +
       '<span class="tag">' + esc(f.id) + '</span>' +
+      (f.decision === 'candidate' ? '<span class="tag" style="color:var(--n-med)">conditional</span>' : '') +
       (f.detection_source === 'ai' ? '<span class="tag">AI suggested</span>' : '') + '</div>' +
       '<div class="body">' + esc(f.description) + '</div>' +
       '<dl class="facts"><dt>Resource</dt><dd class="mono">' + esc(f.resource) + (f.resource_type ? ' (' + esc(f.resource_type) + ')' : '') + '</dd>' +
@@ -499,12 +611,22 @@
 
   function renderRemediation() {
     var f = findingById(state.selId);
-    if (!f) return;
+    if (!f) {
+      $('rem-header').innerHTML = '<div class="empty-panel">No remediation is needed because this analysis has no findings.</div>';
+      $('rem-actions').innerHTML = '';
+      $('policy-code').textContent = '';
+      $('policy-caption').textContent = 'No proposal selected';
+      $('validation-checks').innerHTML = '<div class="empty-panel">No proposal to check.</div>';
+      $('validation-status').textContent = 'No proposal';
+      $('compliance').innerHTML = '<div>Nothing mapped for this result.</div>';
+      $('queue-mini').innerHTML = '<div class="empty-panel">Queue is empty.</div>';
+      return;
+    }
     var real = state.data.remediations[f.id];
 
     /* Prefer the backend's own remediation for this finding; the local
        strategy table is only used in the offline preview. */
-    var actions, hardened, compliance, score, summary;
+    var actions, hardened, original, compliance, score, summary, validation, requiredInputs;
     if (real) {
       actions = (real.actions || []).map(function (a) {
         return {
@@ -515,9 +637,12 @@
         };
       });
       hardened = real.hardened_policy || {};
+      original = real.original_policy || {};
       compliance = real.compliance_notes || [];
       score = real.risk_score;
       summary = real.summary || '';
+      validation = real.validation || {};
+      requiredInputs = real.required_inputs || [];
     } else {
       var strategy = strategyFor(f);
       actions = (STRATEGY_ACTIONS[strategy] || STRATEGY_ACTIONS.attach_policy).map(function (a) {
@@ -528,12 +653,15 @@
         : { Version: '2012-10-17', Statement: [{
             Effect: 'Allow',
             Action: strategy === 'access_key' ? ['iam:CreateAccessKey'] : strategy === 'pass_role' ? ['iam:PassRole'] : ['iam:CreateAccessKey', 'iam:PassRole'],
-            Resource: strategy === 'access_key' ? ['arn:aws:iam::123456789012:user/${aws:username}'] : ['arn:aws:iam::123456789012:role/AppSpecificRole'],
-            Condition: { StringEquals: { 'aws:RequestedRegion': 'us-east-1' } }
+            Resource: strategy === 'access_key' ? ['arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}'] : ['arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>']
           }] };
       compliance = ['CIS AWS Foundations Benchmark', 'NIST 800-53 Access Control Family'];
       score = RISK_BY_SEV[f.severity];
       summary = 'Vulnerability in ' + f.resource + ': ' + f.title + '.';
+      original = f.policy_document && f.policy_document.statement
+        ? { Version: '2012-10-17', Statement: [f.policy_document.statement] } : {};
+      validation = { status: 'review_required', policy_structure: 'unknown', conditions_preserved: false, change_present: false, export_ready: false, modeled_impact: 'not_run' };
+      requiredInputs = ['Backend connection'];
     }
 
     $('rem-header').innerHTML =
@@ -553,9 +681,58 @@
         '<div class="explain">' + esc(a.explanation) + '</div></div></div>';
     }).join('') || '<div class="panel"><div class="panel-body" style="color:var(--n-mute)">No remediation actions returned for this finding.</div></div>';
 
-    $('hardened-policy').textContent = JSON.stringify(hardened, null, 2);
-    $('compliance').innerHTML = compliance.map(function (c) { return '<div><span class="ok">✓</span><span>' + esc(c) + '</span></div>'; }).join('');
-    $('queue-mini').innerHTML = queueHtml(5);
+    state.currentPolicy = { original: original, proposed: hardened, validation: validation, requiredInputs: requiredInputs };
+    renderPolicyWorkbench();
+    $('compliance').innerHTML = compliance.map(function (c) { return '<div><span>↳</span><span>' + esc(c) + '</span></div>'; }).join('') || '<div>No compliance mappings returned.</div>';
+    $('queue-mini').innerHTML = queueHtml(5) || '<div class="empty-panel">Queue is empty.</div>';
+  }
+
+  function policyDiff(original, proposed) {
+    var before = JSON.stringify(original || {}, null, 2).split('\n');
+    var after = JSON.stringify(proposed || {}, null, 2).split('\n');
+    var prefix = 0, suffix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    while (suffix < before.length - prefix && suffix < after.length - prefix &&
+      before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+    var lines = before.slice(0, prefix).map(function (line) { return '  ' + line; });
+    before.slice(prefix, before.length - suffix).forEach(function (line) { lines.push('- ' + line); });
+    after.slice(prefix, after.length - suffix).forEach(function (line) { lines.push('+ ' + line); });
+    before.slice(before.length - suffix).forEach(function (line) { lines.push('  ' + line); });
+    return lines.join('\n');
+  }
+
+  function renderPolicyWorkbench() {
+    var current = state.currentPolicy || { original: {}, proposed: {}, validation: {}, requiredInputs: [] };
+    var view = state.policyView;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-policy-view]'), function (button) {
+      button.setAttribute('aria-selected', button.getAttribute('data-policy-view') === view ? 'true' : 'false');
+    });
+    var text = view === 'original' ? JSON.stringify(current.original || {}, null, 2)
+      : view === 'diff' ? policyDiff(current.original, current.proposed)
+      : JSON.stringify(current.proposed || {}, null, 2);
+    $('policy-code').textContent = text;
+    $('policy-code').className = view === 'diff' ? 'diff-text' : '';
+    state.currentPolicy.visibleText = text;
+    var validation = current.validation || {};
+    var ready = validation.export_ready;
+    $('policy-caption').textContent = view === 'original' ? 'Exact source statement retained by the finding'
+      : view === 'diff' ? 'Lines prefixed − are removed; lines prefixed + are proposed'
+      : ready ? 'Structurally checked proposal; workflow access still needs review'
+      : 'Proposal template; resolve required inputs before export';
+    var checks = [
+      ['Policy structure', validation.policy_structure || 'unknown', validation.policy_structure === 'passed'],
+      ['Original conditions preserved', validation.conditions_preserved ? 'passed' : 'review', !!validation.conditions_preserved],
+      ['Change present', validation.change_present ? 'passed' : 'review', !!validation.change_present],
+      ['Modeled impact', validation.modeled_impact === 'not_run' ? 'not run' : validation.modeled_impact, false]
+    ];
+    $('validation-checks').innerHTML = checks.map(function (check) {
+      return '<div class="validation-row"><span>' + esc(check[0]) + '</span><span class="tag ' + (check[2] ? 'check-pass' : 'check-review') + '">' + esc(check[1]) + '</span></div>';
+    }).join('') + (current.requiredInputs || []).map(function (input) {
+      return '<div class="validation-row"><span>Required input</span><span class="tag check-review">' + esc(input) + '</span></div>';
+    }).join('') + '<div class="validation-note">' + esc(validation.note || 'No AWS change has been applied.') + '</div>';
+    $('validation-status').textContent = ready ? 'Structurally checked' : current.proposed && Object.keys(current.proposed).length ? 'Review required' : 'No proposal';
+    $('validation-status').className = 'tag ' + (ready ? 'check-pass' : 'check-review');
+    $('validate-proposal').textContent = state.validationReviewed ? 'Checks reviewed' : 'Review checks';
   }
 
   function queueHtml(limit) {
@@ -567,18 +744,57 @@
   }
 
   function renderVisualizer() {
-    var chains = state.groups.slice(0, 3).map(function (g) {
-      var items = g.ids.map(findingById).slice().sort(function (a, b) { return SEV_ORDER[a.severity] - SEV_ORDER[b.severity]; });
-      return { identity: g.name, steps: items };
-    });
-    $('chain-count').textContent = chains.length + ' identities';
-    $('chains').innerHTML = chains.map(function (c) {
-      return '<div class="chain"><div class="chain-head"><span>' + esc(c.identity) + '</span><span style="color:var(--n-mute);font-size:10px">' + c.steps.length + ' steps</span></div>' +
-        '<div class="chain-steps">' + c.steps.map(function (s) {
-          return '<div class="chain-step"><i class="dot" style="background:' + SEV_VAR[s.severity] + '"></i>' +
-            '<span class="action">' + esc(s.title) + '</span><span class="tech">' + esc(s.mitre.join(', ')) + '</span></div>';
-        }).join('') + '</div></div>';
-    }).join('');
+    var paths = state.data.paths || [];
+    if (!state.selectedPath || !paths.some(function (path) { return path.id === state.selectedPath; })) {
+      state.selectedPath = paths.length ? paths[0].id : null;
+      state.selectedEvidence = 0;
+    }
+    $('chain-count').textContent = paths.length + ' path' + (paths.length === 1 ? '' : 's');
+    $('chains').innerHTML = paths.map(function (path) {
+      var selected = path.id === state.selectedPath;
+      return '<button class="path-list-row' + (selected ? ' selected' : '') + '" data-path-select="' + esc(path.id) + '">' +
+        '<span class="path-list-top"><span>' + esc(path.technique) + '</span><span class="tag ' + (path.decision === 'candidate' ? 'check-review' : 'check-pass') + '">' + esc(path.decision || 'allowed') + '</span></span>' +
+        '<span class="path-list-meta">' + esc(path.affected_identity) + ' · ' + esc((path.required_permissions || []).join(' + ')) + '</span></button>';
+    }).join('') || '<div class="empty-panel">No candidate escalation paths in this analysis.</div>';
+
+    var selectedPath = paths.filter(function (path) { return path.id === state.selectedPath; })[0];
+    if (!selectedPath) {
+      $('path-title').textContent = 'No path selected';
+      $('path-subtitle').textContent = 'Run an analysis with reachable escalation techniques.';
+      $('path-decision').textContent = 'No path';
+      $('path-nodes').innerHTML = '<div class="empty-panel">Nothing to display.</div>';
+      $('evidence-code').textContent = '';
+      $('evidence-source').textContent = '';
+      $('path-unknowns').innerHTML = '<div class="empty-panel">No path-specific limits.</div>';
+    } else {
+      var evidence = selectedPath.matched_permissions || [];
+      if (state.selectedEvidence >= evidence.length) state.selectedEvidence = 0;
+      var chosen = evidence[state.selectedEvidence] || {};
+      $('path-title').textContent = selectedPath.description || selectedPath.technique;
+      $('path-subtitle').textContent = selectedPath.affected_identity + ' · ' + (selectedPath.required_permissions || []).join(' + ');
+      $('path-decision').textContent = selectedPath.decision === 'candidate' ? 'Conditional candidate' : 'Modeled allowed';
+      $('path-decision').className = 'tag ' + (selectedPath.decision === 'candidate' ? 'check-review' : 'check-pass');
+      var nodes = (selectedPath.path || []).map(function (node, index) {
+        return '<button class="path-node" data-evidence-select="' + Math.min(index, Math.max(0, evidence.length - 1)) + '"><span>' + (index ? 'Reached identity' : 'Entry identity') + '</span><strong>' + esc(node) + '</strong></button>';
+      });
+      nodes.push('<button class="path-node action-node" data-evidence-select="0"><span>Required permission' + ((selectedPath.required_permissions || []).length === 1 ? '' : 's') + '</span><strong>' + esc((selectedPath.required_permissions || []).join(' + ')) + '</strong></button>');
+      $('path-nodes').innerHTML = nodes.join('<span class="path-arrow">→</span>');
+      var statement = chosen.source_statement || chosen.statement || chosen;
+      $('evidence-code').textContent = JSON.stringify(statement && Object.keys(statement).length ? statement : { note: 'No source statement was retained for this legacy path.' }, null, 2);
+      $('evidence-source').textContent = chosen.source_policy || chosen.relationship || ('Evidence ' + (state.selectedEvidence + 1));
+      var unknowns = (selectedPath.unknowns || []).slice();
+      if (!unknowns.length) unknowns.push('This is a modeled IAM decision; verify organization, boundary, session, and workload context before action.');
+      var coverageWarnings = (state.data.coverage && state.data.coverage.warnings) || [];
+      coverageWarnings.forEach(function (warning) { if (unknowns.indexOf(warning) < 0) unknowns.push(warning); });
+      var finding = state.data.findings.filter(function (item) {
+        return item.technique === selectedPath.technique && item.resource === selectedPath.affected_identity.split('::').slice(1).join('::');
+      })[0];
+      $('path-unknowns').innerHTML = unknowns.map(function (item) { return '<div class="limit-row"><span>!</span><span>' + esc(item) + '</span></div>'; }).join('') +
+        (evidence.length > 1 ? '<div class="evidence-pager">' + evidence.map(function (item, index) {
+          return '<button class="chip" data-evidence-select="' + index + '" aria-pressed="' + (index === state.selectedEvidence) + '">' + esc(item.evidence_type || 'evidence') + ' ' + (index + 1) + '</button>';
+        }).join('') + '</div>' : '') +
+        (finding ? '<button class="btn" data-path-remediate="' + esc(finding.id) + '">Review policy change</button>' : '');
+    }
 
     $('tech-count').textContent = state.data.techniques.length + ' techniques';
     var max = Math.max.apply(null, state.data.techniques.map(function (t) { return t.count; }).concat([1]));
@@ -591,7 +807,7 @@
     }).join('');
 
     $('queue-total').textContent = totalHours() + 'h total';
-    $('queue-full').innerHTML = queueHtml();
+    $('queue-full').innerHTML = queueHtml() || '<div class="empty-panel">Queue is empty.</div>';
   }
 
   function donut(items, total) {
@@ -738,6 +954,8 @@
   /* ---------------- navigation ---------------- */
 
   function goTo(view) {
+    if (state.view === 'overview' && view !== 'overview' && hero) { hero.dispose(); hero = null; }
+    if (state.view === 'graph' && view !== 'graph' && graph) { graph.dispose(); graph = null; }
     state.view = view;
     Array.prototype.forEach.call(document.querySelectorAll('.view'), function (el) {
       el.classList.toggle('active', el.getAttribute('data-view') === view);
@@ -775,9 +993,27 @@
 
   /* ---------------- analysis ---------------- */
 
-  function applyResult(payload) {
+  function beginAnalysis(label) {
+    state.requestSerial += 1;
+    state.analysisStatus = 'loading';
+    state.analysisError = '';
+    $('status-text').textContent = label || 'Analyzing…';
+    renderSourcePanel();
+    renderResultState();
+    renderAnalysisContext();
+    return state.requestSerial;
+  }
+
+  function applyResult(payload, requestId) {
+    if (requestId && requestId !== state.requestSerial) return;
     state.data = normalise(payload);
     state.selId = null;
+    state.selectedPath = null;
+    state.selectedEvidence = 0;
+    state.analysisError = '';
+    state.analysisStatus = state.data.coverage && !state.data.coverage.complete ? 'partial'
+      : state.data.findings.length ? 'complete' : 'empty';
+    state.scanTime = new Date();
     var d = state.data;
     var engine = d.aiCount ? 'graph + rule + AI' : 'graph + rule engine';
     var prefix = d.source === 'live' && d.accountId ? ('AWS ' + d.accountId + ' · ') : (engine + ' · ');
@@ -789,7 +1025,30 @@
   function fallbackOffline(msg) {
     state.data = normalise(null);
     state.selId = null;
+    state.analysisStatus = 'partial';
+    state.analysisError = '';
+    state.scanTime = new Date();
     $('status-text').textContent = msg || 'Demo dataset · offline';
+    renderAll();
+    remountGraph();
+  }
+
+  function failAnalysis(message, source, sourceName, requestId) {
+    if (requestId && requestId !== state.requestSerial) return;
+    state.data = normalise({
+      vulnerabilities: [], remediations: [],
+      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
+      summary: {
+        source: source || 'upload', source_name: sourceName || null,
+        identity_count: 0, policy_count: 0, escalation_paths: 0,
+        coverage: { complete: false, warnings: [message] }, ai_status: 'disabled'
+      }
+    });
+    state.selId = null;
+    state.analysisStatus = 'error';
+    state.analysisError = message;
+    state.scanTime = new Date();
+    $('status-text').textContent = 'Analysis failed · ' + message;
     renderAll();
     remountGraph();
   }
@@ -810,28 +1069,67 @@
   /* Load the built-in demo: ask the backend for the config, then analyze it —
      the backend is the single source of truth for the demo scenario. */
   function analyze() {
-    $('status-text').textContent = 'Analyzing…';
+    state.sourceTab = 'demo';
+    var requestId = beginAnalysis('Analyzing demo…');
     postJSON('/api/generate-dummy')
-      .then(function (j) { return postJSON(API, { iam_config: j.iam_config, config_type: 'terraform' }); })
-      .then(applyResult)
-      .catch(function () { fallbackOffline('Demo dataset · offline'); });
+      .then(function (j) { return postJSON(API, { iam_config: j.iam_config, config_type: 'terraform', source: 'demo', source_name: 'Bundled IAM scenario' }); })
+      .then(function (payload) { applyResult(payload, requestId); })
+      .catch(function () { if (requestId === state.requestSerial) fallbackOffline('Demo dataset · backend offline'); });
   }
 
   function scanAccount() {
-    $('status-text').textContent = 'Scanning AWS account…';
+    state.sourceTab = 'live';
+    var requestId = beginAnalysis('Scanning AWS account…');
     var btn = document.getElementById('scan-aws');
     if (btn) btn.disabled = true;
     postJSON('/api/scan-account')
-      .then(applyResult)
+      .then(function (payload) { applyResult(payload, requestId); })
       .catch(function (err) {
-        $('status-text').textContent = 'AWS scan: ' + (err && err.message ? err.message : 'failed');
+        failAnalysis(err && err.message ? err.message : 'AWS scan failed', 'live', 'AWS account', requestId);
       })
       .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  function analyzeUpload() {
+    var text = $('config-input').value.trim();
+    if (!text) {
+      state.analysisError = 'Choose a JSON file or paste a JSON document.';
+      renderSourcePanel();
+      return;
+    }
+    var parsed;
+    try { parsed = JSON.parse(text); }
+    catch (error) {
+      state.analysisError = 'The input is not valid JSON: ' + error.message;
+      renderSourcePanel();
+      return;
+    }
+    state.sourceTab = 'upload';
+    var name = state.uploadedFileName || 'Pasted JSON';
+    var requestId = beginAnalysis('Analyzing ' + name + '…');
+    postJSON(API, { iam_config: parsed, config_type: 'terraform', source: 'upload', source_name: name })
+      .then(function (payload) { applyResult(payload, requestId); })
+      .catch(function (error) { failAnalysis(error.message || 'Analysis failed', 'upload', name, requestId); });
   }
 
   /* ---------------- events ---------------- */
 
   document.addEventListener('click', function (e) {
+    var sourceTab = e.target.closest('[data-source-tab]');
+    if (sourceTab) { state.sourceTab = sourceTab.getAttribute('data-source-tab'); state.analysisError = ''; renderSourcePanel(); return; }
+
+    var pathSelect = e.target.closest('[data-path-select]');
+    if (pathSelect) { state.selectedPath = pathSelect.getAttribute('data-path-select'); state.selectedEvidence = 0; renderVisualizer(); return; }
+
+    var evidenceSelect = e.target.closest('[data-evidence-select]');
+    if (evidenceSelect) { state.selectedEvidence = +evidenceSelect.getAttribute('data-evidence-select'); renderVisualizer(); return; }
+
+    var policyView = e.target.closest('[data-policy-view]');
+    if (policyView) { state.policyView = policyView.getAttribute('data-policy-view'); renderPolicyWorkbench(); return; }
+
+    var pathRemediate = e.target.closest('[data-path-remediate]');
+    if (pathRemediate) { state.selId = pathRemediate.getAttribute('data-path-remediate'); state.policyView = 'diff'; renderRemediation(); goTo('remediation'); return; }
+
     var pi = e.target.closest('[data-pi]');
     if (pi) { runPalette(+pi.getAttribute('data-pi')); return; }
 
@@ -855,13 +1153,23 @@
     if (e.target.closest('#palette-open')) { openPalette(); return; }
     if (e.target.id === 'palette-backdrop') { closePalette(); return; }
     if (e.target.closest('#theme-toggle')) { state.theme = state.theme === 'dark' ? 'light' : 'dark'; applyTheme(); return; }
-    if (e.target.closest('#reanalyze')) { analyze(); return; }
-    if (e.target.closest('#scan-aws')) { scanAccount(); return; }
+    if (e.target.closest('#reanalyze') || e.target.closest('[data-load-demo]')) { analyze(); return; }
+    if (e.target.closest('#scan-aws') || e.target.closest('[data-scan-aws]')) { scanAccount(); return; }
+    if (e.target.closest('#analyze-upload')) { analyzeUpload(); return; }
     if (e.target.closest('#reset-cam')) { if (graph) graph.resetCamera(); return; }
     if (e.target.closest('#copy-policy')) {
-      navigator.clipboard.writeText($('hardened-policy').textContent);
-      e.target.textContent = 'Copied';
-      setTimeout(function () { e.target.textContent = 'Copy'; }, 1400);
+      var copyButton = e.target.closest('#copy-policy');
+      var copyText = state.currentPolicy && state.currentPolicy.visibleText || '';
+      if (!copyText) return;
+      navigator.clipboard.writeText(copyText).then(function () {
+        copyButton.textContent = 'Copied';
+        setTimeout(function () { copyButton.textContent = 'Copy visible policy'; }, 1400);
+      }).catch(function () { copyButton.textContent = 'Copy failed'; });
+      return;
+    }
+    if (e.target.closest('#validate-proposal')) {
+      state.validationReviewed = true;
+      renderPolicyWorkbench();
       return;
     }
     if (e.target.closest('#t-ident')) { state.showIdent = !state.showIdent; $('t-ident').setAttribute('aria-pressed', state.showIdent); $('t-ident').textContent = state.showIdent ? 'Identities on' : 'Identities off'; remountGraph(); return; }
@@ -872,6 +1180,16 @@
   $('finding-search').addEventListener('input', function (e) { state.query = e.target.value; renderFindings(); });
   $('gd-search').addEventListener('input', function (e) { state.gdQuery = e.target.value; renderGraphDetail(); });
   $('palette-input').addEventListener('input', function () { state.paletteIndex = 0; renderPalette(); });
+  $('config-file').addEventListener('change', function (event) {
+    var file = event.target.files && event.target.files[0];
+    if (!file) return;
+    state.uploadedFileName = file.name;
+    $('upload-detail').textContent = file.name + ' · ' + Math.max(1, Math.round(file.size / 1024)) + ' KB';
+    var reader = new FileReader();
+    reader.onload = function () { $('config-input').value = String(reader.result || ''); state.analysisError = ''; renderSourcePanel(); };
+    reader.onerror = function () { state.analysisError = 'The selected file could not be read.'; renderSourcePanel(); };
+    reader.readAsText(file);
+  });
 
   window.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }

@@ -14,7 +14,7 @@ shared contract between:
 from __future__ import annotations
 
 import enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -128,6 +128,17 @@ class IAMGroup(BaseModel):
     inline_policies: list[IAMPolicy] = Field(default_factory=list)
 
 
+class AnalysisCoverage(BaseModel):
+    """What the importer understood, skipped, or cannot evaluate."""
+    input_format: str = "unknown"
+    total_resources: int = 0
+    iam_resources: int = 0
+    skipped_resources: int = 0
+    conditions_present: bool = False
+    complete: bool = True
+    warnings: list[str] = Field(default_factory=list)
+
+
 class IAMData(BaseModel):
     """Complete parsed IAM data — from a live account scan or a pasted config."""
     users: list[IAMUser] = Field(default_factory=list)
@@ -135,6 +146,7 @@ class IAMData(BaseModel):
     groups: list[IAMGroup] = Field(default_factory=list)
     policies: list[IAMPolicy] = Field(default_factory=list)
     account_id: str = "000000000000"
+    coverage: AnalysisCoverage = Field(default_factory=AnalysisCoverage)
 
 
 # ──────────────────────────────────────────────
@@ -147,6 +159,10 @@ class EffectivePermission(BaseModel):
     effect: PolicyEffect
     source_policy: str = ""
     conditions: list[PolicyCondition] = Field(default_factory=list)
+    source_statement: dict[str, Any] = Field(default_factory=dict)
+    excluded_actions: list[str] = Field(default_factory=list)
+    excluded_resources: list[str] = Field(default_factory=list)
+    conditional: bool = False
 
 
 # ──────────────────────────────────────────────
@@ -174,6 +190,9 @@ class GraphLink(BaseModel):
     is_escalation: bool = False
     risk_level: RiskLevel = RiskLevel.NONE
     label: str = ""
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    decision: str = "allowed"
+    unknowns: list[str] = Field(default_factory=list)
 
 
 class EscalationPath(BaseModel):
@@ -184,6 +203,9 @@ class EscalationPath(BaseModel):
     required_permissions: list[str]
     description: str
     affected_identity: str = ""
+    decision: str = "allowed"  # allowed or candidate when request context is missing
+    matched_permissions: list[dict[str, Any]] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
 
 
 class GraphMetadata(BaseModel):
