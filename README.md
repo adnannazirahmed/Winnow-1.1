@@ -101,7 +101,7 @@ pip install -r backend/requirements.txt
 
 # Configure environment (optional - the app runs without an API key)
 cp backend/.env.example backend/.env
-# Edit backend/.env or use Settings in the local UI to connect AWS and an AI provider
+# Edit backend/.env or use Settings in the local UI to verify and connect AWS and an AI provider
 
 # Run the application
 cd backend
@@ -252,9 +252,13 @@ response.
 AI_PROVIDER=anthropic
 AI_MODEL=claude-3-haiku-20240307
 ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_BASE_URL=https://api.anthropic.com
 # OPENAI_API_KEY=...
+# OPENAI_BASE_URL=https://api.openai.com/v1
 # DEEPSEEK_API_KEY=...
+# DEEPSEEK_BASE_URL=https://api.deepseek.com
 # OLLAMA_BASE_URL=http://127.0.0.1:11434
+# OLLAMA_API_KEY=                 # optional for an authenticated proxy
 
 # Server
 PORT=5000
@@ -265,6 +269,7 @@ FLASK_DEBUG=0           # never set to 1 on a public host (RCE via debugger)
 MAX_AI_REMEDIATIONS=5           # max uncached AI calls per analysis
 ANTHROPIC_TIMEOUT_SECONDS=30
 REMEDIATOR_MODEL=claude-3-haiku-20240307
+AI_VALIDATION_TIMEOUT_SECONDS=15
 
 # Limits
 MAX_CONFIG_BYTES=1048576        # max request body (1 MB)
@@ -283,6 +288,9 @@ IAM_VULNERABLE_ACCOUNT_ID=123456789012
 > rule engine. Findings and remediations are still produced; only the
 > "AI Suggested" second-pass detection is skipped.
 
+The Settings screen sends one short request to the selected model and saves the
+configuration only when the URL, API key, and model work together.
+
 ### API Endpoints
 
 | Method | Path | Description |
@@ -291,7 +299,7 @@ IAM_VULNERABLE_ACCOUNT_ID=123456789012
 | `POST` | `/api/scan-account` | Scan the configured AWS account with read-only IAM and STS calls |
 | `GET` | `/api/settings` | Return connection status without exposing credentials |
 | `POST` / `DELETE` | `/api/settings/aws` | Save-and-verify or remove local AWS credentials |
-| `POST` / `DELETE` | `/api/settings/ai` | Save or remove the active local AI provider |
+| `POST` / `DELETE` | `/api/settings/ai` | Verify and save, or remove, the active local AI provider and its provider URL |
 | `POST` | `/api/scan-account` | Scan the caller's live AWS account (read-only) and analyze it |
 | `POST` | `/api/generate-dummy` | Return the bundled demo config |
 | `GET`  | `/health` | Liveness probe |

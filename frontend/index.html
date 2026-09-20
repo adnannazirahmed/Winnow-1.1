@@ -318,14 +318,14 @@
           <form class="panel settings-card" id="ai-settings-form">
             <div class="panel-head"><div><span class="panel-title">AI assistant</span><div class="panel-meta" id="ai-settings-status">Rule engine only</div></div><span class="tag">Optional</span></div>
             <div class="panel-body">
-              <p class="settings-copy">Choose a provider for the optional AI finding and remediation pass. The deterministic rule engine remains available without one.</p>
+              <p class="settings-copy">Choose a provider for the optional AI finding and remediation pass. Winnow sends a short test prompt to verify the URL, key, and model before saving. The deterministic rule engine remains available without one.</p>
               <label class="field-label" for="ai-provider">Provider</label>
               <select class="settings-input" id="ai-provider"><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="ollama">Ollama</option></select>
               <label class="field-label" for="ai-model">Model <span>optional</span></label>
               <input class="settings-input" id="ai-model" type="text" autocomplete="off" spellcheck="false" placeholder="Provider default">
               <div id="ai-key-row"><label class="field-label" for="ai-api-key" id="ai-key-label">API key</label><input class="settings-input" id="ai-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste API key"></div>
-              <div id="ai-base-url-row" hidden><label class="field-label" for="ai-base-url">Ollama URL</label><input class="settings-input" id="ai-base-url" type="url" autocomplete="off" spellcheck="false" value="http://127.0.0.1:11434"></div>
-              <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-ai-settings">Save AI provider</button><button class="btn btn-danger" type="button" id="remove-ai-settings">Remove AI provider</button></div>
+              <div id="ai-base-url-row"><label class="field-label" for="ai-base-url" id="ai-base-url-label">Provider URL</label><input class="settings-input" id="ai-base-url" type="url" autocomplete="off" spellcheck="false"></div>
+              <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-ai-settings">Verify and save</button><button class="btn btn-danger" type="button" id="remove-ai-settings">Remove AI provider</button></div>
             </div>
           </form>
         </div>

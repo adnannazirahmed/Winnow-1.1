@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from typing import Dict, Iterable
+from urllib.parse import urlparse
 
 from dotenv import dotenv_values, set_key, unset_key
 
@@ -22,6 +23,24 @@ AI_KEY_BY_PROVIDER = {
     'ollama': 'OLLAMA_API_KEY',
 }
 AI_PROVIDERS = tuple(AI_KEY_BY_PROVIDER)
+AI_URL_BY_PROVIDER = {
+    'anthropic': 'ANTHROPIC_BASE_URL',
+    'openai': 'OPENAI_BASE_URL',
+    'deepseek': 'DEEPSEEK_BASE_URL',
+    'ollama': 'OLLAMA_BASE_URL',
+}
+AI_DEFAULT_URLS = {
+    'anthropic': 'https://api.anthropic.com',
+    'openai': 'https://api.openai.com/v1',
+    'deepseek': 'https://api.deepseek.com',
+    'ollama': 'http://127.0.0.1:11434',
+}
+AI_DEFAULT_MODELS = {
+    'anthropic': 'claude-3-haiku-20240307',
+    'openai': 'gpt-4o-mini',
+    'deepseek': 'deepseek-chat',
+    'ollama': 'llama3.2',
+}
 _AWS_ACCESS_KEY = re.compile(r'^[A-Z0-9]{16,128}$')
 _AWS_REGION = re.compile(r'^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+$')
 
@@ -83,39 +102,52 @@ def remove_aws_credentials() -> None:
     _save({}, AWS_KEYS)
 
 
-def save_ai_configuration(data: Dict[str, object]) -> None:
+def normalise_ai_configuration(data: Dict[str, object]) -> Dict[str, str]:
     provider = _clean(data.get('provider'), 'AI provider', 32).lower()
     if provider == 'claude':
         provider = 'anthropic'
     if provider not in AI_PROVIDERS:
         raise ValueError('Choose Claude, Ollama, OpenAI, or DeepSeek')
 
-    model = _clean(data.get('model'), 'AI model', 160)
+    model = _clean(data.get('model'), 'AI model', 160) or AI_DEFAULT_MODELS[provider]
     api_key = _clean(data.get('api_key'), 'AI API key', 4096)
-    base_url = _clean(data.get('base_url'), 'Ollama URL', 512)
+    base_url = _clean(data.get('base_url'), 'Provider URL', 512) or AI_DEFAULT_URLS[provider]
     if provider != 'ollama' and not api_key:
         raise ValueError('Enter an API key for the selected provider')
-    if provider == 'ollama' and base_url and not re.match(r'^https?://', base_url):
-        raise ValueError('Ollama URL must start with http:// or https://')
+    parsed_url = urlparse(base_url)
+    if parsed_url.scheme not in ('http', 'https') or not parsed_url.netloc:
+        raise ValueError('Provider URL must be a complete http:// or https:// URL')
+    return {
+        'provider': provider,
+        'model': model,
+        'api_key': api_key,
+        'base_url': base_url.rstrip('/'),
+    }
 
-    updates = {'AI_PROVIDER': provider}
+
+def save_ai_configuration(data: Dict[str, object]) -> None:
+    config = normalise_ai_configuration(data)
+    provider = config['provider']
+
+    updates = {
+        'AI_PROVIDER': provider,
+        'AI_MODEL': config['model'],
+        AI_URL_BY_PROVIDER[provider]: config['base_url'],
+    }
     # One active provider is intentionally stored at a time. Switching does
     # not leave an unused provider key behind in the local env file.
     removals = [key for name, key in AI_KEY_BY_PROVIDER.items() if name != provider]
-    if model:
-        updates['AI_MODEL'] = model
-    else:
-        removals.append('AI_MODEL')
-    if api_key:
-        updates[AI_KEY_BY_PROVIDER[provider]] = api_key
-    if provider == 'ollama':
-        updates['OLLAMA_BASE_URL'] = base_url or 'http://127.0.0.1:11434'
+    if config['api_key']:
+        updates[AI_KEY_BY_PROVIDER[provider]] = config['api_key']
+    elif provider == 'ollama':
+        removals.append(AI_KEY_BY_PROVIDER[provider])
     _save(updates, removals)
 
 
 def remove_ai_configuration() -> None:
-    removals = ['AI_PROVIDER', 'AI_MODEL', 'OLLAMA_BASE_URL']
+    removals = ['AI_PROVIDER', 'AI_MODEL']
     removals.extend(AI_KEY_BY_PROVIDER.values())
+    removals.extend(AI_URL_BY_PROVIDER.values())
     _save({}, removals)
 
 
@@ -145,6 +177,9 @@ def public_settings() -> Dict[str, object]:
             'provider': provider or 'anthropic',
             'configured': bool(provider and os.environ.get(AI_KEY_BY_PROVIDER[provider], '') if provider != 'ollama' else provider),
             'model': os.environ.get('AI_MODEL', ''),
-            'base_url': os.environ.get('OLLAMA_BASE_URL', 'http://127.0.0.1:11434'),
+            'base_url': os.environ.get(
+                AI_URL_BY_PROVIDER.get(provider or 'anthropic', 'ANTHROPIC_BASE_URL'),
+                AI_DEFAULT_URLS.get(provider or 'anthropic', AI_DEFAULT_URLS['anthropic']),
+            ),
         },
     }

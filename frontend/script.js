@@ -470,12 +470,30 @@
     host.style.color = error ? 'var(--n-crit)' : 'var(--n-ink-2)';
   }
 
-  function updateAIFields() {
+  var AI_URL_DEFAULTS = {
+    anthropic: 'https://api.anthropic.com',
+    openai: 'https://api.openai.com/v1',
+    deepseek: 'https://api.deepseek.com',
+    ollama: 'http://127.0.0.1:11434'
+  };
+  var AI_MODEL_DEFAULTS = {
+    anthropic: 'claude-3-haiku-20240307',
+    openai: 'gpt-4o-mini',
+    deepseek: 'deepseek-chat',
+    ollama: 'llama3.2'
+  };
+
+  function updateAIFields(resetProviderValues) {
     var provider = $('ai-provider').value;
     var labels = { anthropic: 'Anthropic API key', openai: 'OpenAI API key', deepseek: 'DeepSeek API key', ollama: 'Ollama API key · optional' };
+    var urlLabels = { anthropic: 'Anthropic URL', openai: 'OpenAI URL', deepseek: 'DeepSeek URL', ollama: 'Ollama URL' };
     $('ai-key-label').textContent = labels[provider] || 'API key';
     $('ai-api-key').placeholder = provider === 'ollama' ? 'Only needed for an authenticated Ollama proxy' : 'Paste API key';
-    $('ai-base-url-row').hidden = provider !== 'ollama';
+    $('ai-model').placeholder = AI_MODEL_DEFAULTS[provider] || 'Provider default';
+    $('ai-base-url-label').textContent = urlLabels[provider] || 'Provider URL';
+    $('ai-base-url').placeholder = AI_URL_DEFAULTS[provider] || '';
+    if (resetProviderValues) $('ai-model').value = '';
+    if (resetProviderValues || !$('ai-base-url').value) $('ai-base-url').value = AI_URL_DEFAULTS[provider] || '';
   }
 
   function renderSettings() {
@@ -488,10 +506,10 @@
     if (!$('aws-region').value || $('aws-region').value === 'us-east-1') $('aws-region').value = aws.region || 'us-east-1';
     $('ai-provider').value = ai.provider || 'anthropic';
     if (!$('ai-model').value) $('ai-model').value = ai.model || '';
-    if (!$('ai-base-url').value || $('ai-base-url').value === 'http://127.0.0.1:11434') $('ai-base-url').value = ai.base_url || 'http://127.0.0.1:11434';
+    $('ai-base-url').value = ai.base_url || AI_URL_DEFAULTS[ai.provider || 'anthropic'];
     $('ai-settings-status').textContent = ai.configured
-      ? (ai.provider === 'anthropic' ? 'Claude' : ai.provider) + ' connected' : 'Rule engine only';
-    updateAIFields();
+      ? (ai.provider === 'anthropic' ? 'Claude' : ai.provider) + ' configured' : 'Rule engine only';
+    updateAIFields(false);
   }
 
   function renderResultState() {
@@ -1243,16 +1261,16 @@
 
   function saveAISettings() {
     setSettingsMessage('', false);
-    setButtonBusy('save-ai-settings', true, 'Saving…', 'Save AI provider');
+    setButtonBusy('save-ai-settings', true, 'Verifying…', 'Verify and save');
     requestJSON('/api/settings/ai', 'POST', {
       provider: $('ai-provider').value, model: $('ai-model').value,
       api_key: $('ai-api-key').value, base_url: $('ai-base-url').value
     }).then(function (payload) {
       state.settings = payload.settings;
       $('ai-api-key').value = '';
-      renderSettings(); setSettingsMessage('AI provider saved to backend/.env and ready for the next analysis.', false);
+      renderSettings(); setSettingsMessage('AI provider verified, saved to backend/.env, and ready for the next analysis.', false);
     }).catch(function (error) { setSettingsMessage(error.message || 'Could not save AI provider.', true); })
-      .then(function () { setButtonBusy('save-ai-settings', false, 'Saving…', 'Save AI provider'); });
+      .then(function () { setButtonBusy('save-ai-settings', false, 'Verifying…', 'Verify and save'); });
   }
 
   function removeAISettings() {
@@ -1395,7 +1413,7 @@
   });
   $('aws-settings-form').addEventListener('submit', function (event) { event.preventDefault(); saveAWSSettings(); });
   $('ai-settings-form').addEventListener('submit', function (event) { event.preventDefault(); saveAISettings(); });
-  $('ai-provider').addEventListener('change', updateAIFields);
+  $('ai-provider').addEventListener('change', function () { updateAIFields(true); });
 
   window.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }

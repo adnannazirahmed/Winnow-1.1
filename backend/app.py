@@ -12,6 +12,7 @@ import iam_ingest
 import iam_graph
 from graph_to_findings import graph_to_findings
 from risk_brief import RiskBriefGenerator
+from ai_provider import AIConnectionError, AIProvider
 import settings
 
 load_dotenv()
@@ -317,11 +318,20 @@ def ai_settings():
     if not isinstance(data, dict):
         return jsonify({'error': 'Send AI settings as JSON.'}), 400
     try:
+        config = settings.normalise_ai_configuration(data)
+        probe = AIProvider(
+            provider=config['provider'], api_key=config['api_key'],
+            model=config['model'], base_url=config['base_url'],
+            timeout=float(os.environ.get('AI_VALIDATION_TIMEOUT_SECONDS', '15')),
+        )
+        probe.validate_connection()
         settings.save_ai_configuration(data)
         _refresh_ai_components()
-        return jsonify({'settings': settings.public_settings()})
+        return jsonify({'settings': settings.public_settings(), 'verified': True})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    except AIConnectionError as e:
+        return jsonify({'error': str(e)}), 422
 
 
 @app.route('/health')
