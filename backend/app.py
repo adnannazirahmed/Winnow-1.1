@@ -11,6 +11,7 @@ from visualizer import Visualizer
 import iam_ingest
 import iam_graph
 from graph_to_findings import graph_to_findings
+import settings
 
 load_dotenv()
 
@@ -38,6 +39,27 @@ remediator = Remediator()
 visualizer = Visualizer()
 
 _SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+
+
+def _refresh_ai_components():
+    """Apply a settings change without requiring the user to restart Flask."""
+    global ai_detector, remediator
+    ai_detector = AIDetector()
+    remediator = Remediator()
+
+
+def _settings_write_allowed():
+    """Secrets may be entered through the UI only from this machine by default.
+    An operator deploying the app remotely can opt in deliberately."""
+    if os.environ.get('ALLOW_REMOTE_SETTINGS') == '1':
+        return True
+    return request.remote_addr in ('127.0.0.1', '::1', None)
+
+
+def _settings_write_guard():
+    if not _settings_write_allowed():
+        return jsonify({'error': 'Settings changes are available only from the server machine.'}), 403
+    return None
 
 
 @app.after_request
@@ -226,6 +248,71 @@ def generate_dummy():
     except Exception:
         logger.exception("Dummy generation error")
         return jsonify({'error': 'Internal server error'}), 500
+
+
+# ──────────────────────────────────────────────
+#  Local integration settings
+# ──────────────────────────────────────────────
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    return jsonify(settings.public_settings())
+
+
+@app.route('/api/settings/aws', methods=['POST', 'DELETE'])
+def aws_settings():
+    guard = _settings_write_guard()
+    if guard:
+        return guard
+    if request.method == 'DELETE':
+        settings.remove_aws_credentials()
+        return jsonify({'settings': settings.public_settings()})
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Send AWS credentials as JSON.'}), 400
+    try:
+        settings.save_aws_credentials(data)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    # Confirm the submitted credentials through Winnow's existing read-only
+    # inventory call. The returned result saves a duplicate scan request.
+    try:
+        import aws_collector
+        raw, account_id = aws_collector.collect_account_authorization_details()
+        iam_data = iam_ingest.parse_gaad(raw, account_id)
+        return jsonify({
+            'settings': settings.public_settings(),
+            'analysis': _run_pipeline(iam_data, source='live'),
+        })
+    except Exception as e:
+        logger.info('Saved AWS settings could not be verified: %s', type(e).__name__)
+        return jsonify({
+            'error': 'Credentials were saved but could not be verified. Check the key, region, and IAM read permissions.',
+            'settings': settings.public_settings(),
+        }), 422
+
+
+@app.route('/api/settings/ai', methods=['POST', 'DELETE'])
+def ai_settings():
+    guard = _settings_write_guard()
+    if guard:
+        return guard
+    if request.method == 'DELETE':
+        settings.remove_ai_configuration()
+        _refresh_ai_components()
+        return jsonify({'settings': settings.public_settings()})
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Send AI settings as JSON.'}), 400
+    try:
+        settings.save_ai_configuration(data)
+        _refresh_ai_components()
+        return jsonify({'settings': settings.public_settings()})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/health')

@@ -184,7 +184,8 @@
     validationReviewed: false,
     currentPolicy: null,
     requestSerial: 0,
-    uploadedFileName: ''
+    uploadedFileName: '',
+    settings: null
   };
 
   var hero = null, graph = null;
@@ -195,9 +196,10 @@
     ['findings', 'Findings', ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8']],
     ['remediation', 'Remediation', ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z']],
     ['visualizer', 'Path explorer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
-    ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']]
+    ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']],
+    ['settings', 'Settings', ['M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z', 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.42 2.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.6h-3.4v-.08A1.7 1.7 0 0 0 9.96 19a1.7 1.7 0 0 0-1.88.34l-.06.06-2.42-2.42.06-.06A1.7 1.7 0 0 0 6 15.04 1.7 1.7 0 0 0 4.44 14H4.36v-3.4h.08A1.7 1.7 0 0 0 6 9.56a1.7 1.7 0 0 0-.34-1.88L5.6 7.62 8.02 5.2l.06.06A1.7 1.7 0 0 0 9.96 5.6 1.7 1.7 0 0 0 11 4.04v-.08h3.4v.08A1.7 1.7 0 0 0 15.44 5.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.42 2.42-.06.06A1.7 1.7 0 0 0 19.4 9.56 1.7 1.7 0 0 0 20.96 10.6h.08V14h-.08A1.7 1.7 0 0 0 19.4 15z']]
   ];
-  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', charts: 'Charts' };
+  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', charts: 'Charts', settings: 'Settings' };
 
   /* ---------------- helpers ---------------- */
 
@@ -390,6 +392,39 @@
     var message = $('source-message');
     message.hidden = !state.analysisError;
     message.textContent = state.analysisError || '';
+  }
+
+  function setSettingsMessage(message, error) {
+    var host = $('settings-message');
+    if (!host) return;
+    host.hidden = !message;
+    host.textContent = message || '';
+    host.style.borderColor = error ? 'var(--n-crit)' : 'var(--n-low)';
+    host.style.color = error ? 'var(--n-crit)' : 'var(--n-ink-2)';
+  }
+
+  function updateAIFields() {
+    var provider = $('ai-provider').value;
+    var labels = { anthropic: 'Anthropic API key', openai: 'OpenAI API key', deepseek: 'DeepSeek API key', ollama: 'Ollama API key · optional' };
+    $('ai-key-label').textContent = labels[provider] || 'API key';
+    $('ai-api-key').placeholder = provider === 'ollama' ? 'Only needed for an authenticated Ollama proxy' : 'Paste API key';
+    $('ai-base-url-row').hidden = provider !== 'ollama';
+  }
+
+  function renderSettings() {
+    var s = state.settings;
+    if (!s) return;
+    var aws = s.aws || {}, ai = s.ai || {};
+    $('aws-settings-status').textContent = aws.configured
+      ? 'Connected ' + (aws.access_key_hint || '') + ' · ' + (aws.region || 'us-east-1')
+      : 'Not connected';
+    if (!$('aws-region').value || $('aws-region').value === 'us-east-1') $('aws-region').value = aws.region || 'us-east-1';
+    $('ai-provider').value = ai.provider || 'anthropic';
+    if (!$('ai-model').value) $('ai-model').value = ai.model || '';
+    if (!$('ai-base-url').value || $('ai-base-url').value === 'http://127.0.0.1:11434') $('ai-base-url').value = ai.base_url || 'http://127.0.0.1:11434';
+    $('ai-settings-status').textContent = ai.configured
+      ? (ai.provider === 'anthropic' ? 'Claude' : ai.provider) + ' connected' : 'Rule engine only';
+    updateAIFields();
   }
 
   function renderResultState() {
@@ -968,6 +1003,7 @@
     if (view === 'remediation') renderRemediation();
     if (view === 'visualizer') renderVisualizer();
     if (view === 'charts') renderCharts();
+    if (view === 'settings') renderSettings();
     try { history.replaceState(null, '', '#' + view); } catch (e) {}
   }
 
@@ -977,7 +1013,7 @@
     renderNav(); renderTopbar();
     renderOverview(); renderInspector(); renderFindings();
     renderRemediation(); renderVisualizer(); renderCharts();
-    renderGraphDetail();
+    renderGraphDetail(); renderSettings();
   }
 
   function applyTheme() {
@@ -1077,6 +1113,88 @@
       .catch(function () { if (requestId === state.requestSerial) fallbackOffline('Demo dataset · backend offline'); });
   }
 
+  function requestJSON(path, method, body) {
+    return fetch(path, {
+      method: method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.error) throw new Error(j.error || ('http ' + r.status));
+        return j;
+      });
+    });
+  }
+
+  function loadSettings() {
+    fetch('/api/settings').then(function (r) { return r.json(); }).then(function (payload) {
+      state.settings = payload;
+      renderSettings();
+    }).catch(function () { setSettingsMessage('Settings are unavailable while the backend is offline.', true); });
+  }
+
+  function setButtonBusy(id, busy, busyText, defaultText) {
+    var button = $(id);
+    if (!button) return;
+    button.disabled = busy;
+    button.textContent = busy ? busyText : defaultText;
+  }
+
+  function saveAWSSettings() {
+    setSettingsMessage('', false);
+    setButtonBusy('save-aws-settings', true, 'Verifying…', 'Save and scan');
+    requestJSON('/api/settings/aws', 'POST', {
+      access_key_id: $('aws-access-key').value,
+      secret_access_key: $('aws-secret-key').value,
+      session_token: $('aws-session-token').value,
+      region: $('aws-region').value
+    }).then(function (payload) {
+      state.settings = payload.settings;
+      $('aws-secret-key').value = ''; $('aws-session-token').value = '';
+      renderSettings();
+      setSettingsMessage('AWS account verified and saved to backend/.env.', false);
+      if (payload.analysis) {
+        state.sourceTab = 'live';
+        var requestId = beginAnalysis('Connected AWS account…');
+        applyResult(payload.analysis, requestId);
+        goTo('overview');
+      }
+    }).catch(function (error) {
+      setSettingsMessage(error.message || 'AWS connection failed.', true);
+      loadSettings();
+    }).then(function () { setButtonBusy('save-aws-settings', false, 'Verifying…', 'Save and scan'); });
+  }
+
+  function removeAWSSettings() {
+    requestJSON('/api/settings/aws', 'DELETE').then(function (payload) {
+      state.settings = payload.settings;
+      $('aws-access-key').value = ''; $('aws-secret-key').value = ''; $('aws-session-token').value = '';
+      renderSettings(); setSettingsMessage('Saved AWS credentials were removed from backend/.env.', false);
+    }).catch(function (error) { setSettingsMessage(error.message || 'Could not remove AWS credentials.', true); });
+  }
+
+  function saveAISettings() {
+    setSettingsMessage('', false);
+    setButtonBusy('save-ai-settings', true, 'Saving…', 'Save AI provider');
+    requestJSON('/api/settings/ai', 'POST', {
+      provider: $('ai-provider').value, model: $('ai-model').value,
+      api_key: $('ai-api-key').value, base_url: $('ai-base-url').value
+    }).then(function (payload) {
+      state.settings = payload.settings;
+      $('ai-api-key').value = '';
+      renderSettings(); setSettingsMessage('AI provider saved to backend/.env and ready for the next analysis.', false);
+    }).catch(function (error) { setSettingsMessage(error.message || 'Could not save AI provider.', true); })
+      .then(function () { setButtonBusy('save-ai-settings', false, 'Saving…', 'Save AI provider'); });
+  }
+
+  function removeAISettings() {
+    requestJSON('/api/settings/ai', 'DELETE').then(function (payload) {
+      state.settings = payload.settings;
+      $('ai-api-key').value = ''; $('ai-model').value = '';
+      renderSettings(); setSettingsMessage('Saved AI provider settings were removed from backend/.env.', false);
+    }).catch(function (error) { setSettingsMessage(error.message || 'Could not remove AI provider.', true); });
+  }
+
   function scanAccount() {
     state.sourceTab = 'live';
     var requestId = beginAnalysis('Scanning AWS account…');
@@ -1156,6 +1274,8 @@
     if (e.target.closest('#reanalyze') || e.target.closest('[data-load-demo]')) { analyze(); return; }
     if (e.target.closest('#scan-aws') || e.target.closest('[data-scan-aws]')) { scanAccount(); return; }
     if (e.target.closest('#analyze-upload')) { analyzeUpload(); return; }
+    if (e.target.closest('#remove-aws-settings')) { removeAWSSettings(); return; }
+    if (e.target.closest('#remove-ai-settings')) { removeAISettings(); return; }
     if (e.target.closest('#reset-cam')) { if (graph) graph.resetCamera(); return; }
     if (e.target.closest('#copy-policy')) {
       var copyButton = e.target.closest('#copy-policy');
@@ -1190,6 +1310,9 @@
     reader.onerror = function () { state.analysisError = 'The selected file could not be read.'; renderSourcePanel(); };
     reader.readAsText(file);
   });
+  $('aws-settings-form').addEventListener('submit', function (event) { event.preventDefault(); saveAWSSettings(); });
+  $('ai-settings-form').addEventListener('submit', function (event) { event.preventDefault(); saveAISettings(); });
+  $('ai-provider').addEventListener('change', updateAIFields);
 
   window.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
@@ -1215,5 +1338,6 @@
   var initialView = (location.hash || '').slice(1);
   goTo(initialView in TITLES ? initialView : 'overview');
   window.scrollTo(0, 0);
+  loadSettings();
   analyze();
 })();

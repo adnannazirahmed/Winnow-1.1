@@ -6,6 +6,7 @@ import threading
 import copy
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
+from ai_provider import AIProvider
 
 try:
     import anthropic
@@ -109,15 +110,21 @@ Provide remediation as JSON with this structure:
 
     def __init__(self):
         self.client = None
+        self.provider_client = None
+        self.provider_name = os.environ.get('AI_PROVIDER', '').strip().lower()
+        if self.provider_name == 'claude':
+            self.provider_name = 'anthropic'
+        if not self.provider_name:
+            self.provider_name = 'anthropic' if os.environ.get('ANTHROPIC_API_KEY') else ''
         self.api_key = os.environ.get('ANTHROPIC_API_KEY')
-        self.model = os.environ.get('REMEDIATOR_MODEL', 'claude-3-haiku-20240307')
+        self.model = os.environ.get('AI_MODEL') or os.environ.get('REMEDIATOR_MODEL', 'claude-3-haiku-20240307')
         # Cap on AI calls per analysis request; the rest use the rule-based
         # fallback. Prevents unbounded cost/latency fan-out per request.
         self.max_ai_calls_per_batch = int(os.environ.get('MAX_AI_REMEDIATIONS', '5'))
         self._cache: Dict[str, Dict] = {}
         self._cache_lock = threading.Lock()
         self._cache_max = 256
-        if self.api_key and ANTHROPIC_AVAILABLE:
+        if self.provider_name == 'anthropic' and self.api_key and ANTHROPIC_AVAILABLE:
             try:
                 self.client = anthropic.Anthropic(
                     api_key=self.api_key,
@@ -127,6 +134,10 @@ Provide remediation as JSON with this structure:
             except Exception as e:
                 logger.warning(f"Failed to init Anthropic client: {e}")
                 self.client = None
+        elif self.provider_name != 'anthropic':
+            self.provider_client = AIProvider()
+            if not self.provider_client.enabled:
+                logger.warning("AI provider is not configured. Using fallback remediation.")
         else:
             logger.warning("Anthropic API key not set or anthropic package not available. Using fallback remediation.")
 
@@ -144,7 +155,7 @@ Provide remediation as JSON with this structure:
             if cached is not None:
                 results.append(self._bind(cached, vuln))
                 continue
-            if self.client and ai_calls_used < self.max_ai_calls_per_batch:
+            if (self.client or (self.provider_client and self.provider_client.enabled)) and ai_calls_used < self.max_ai_calls_per_batch:
                 ai_calls_used += 1
                 result = self._get_ai_remediation(vuln)
             else:
@@ -158,7 +169,7 @@ Provide remediation as JSON with this structure:
         cached = self._cache_get(vulnerability)
         if cached is not None:
             return self._bind(cached, vulnerability)
-        if self.client:
+        if self.client or (self.provider_client and self.provider_client.enabled):
             result = self._get_ai_remediation(vulnerability)
         else:
             result = self._get_fallback_remediation(vulnerability)
@@ -218,15 +229,15 @@ Provide remediation as JSON with this structure:
                 remediation_hint=vulnerability.get('remediation_hint', '')
             )
 
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=2000,
-                temperature=0.1,
-                system=self.SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            content = response.content[0].text
+            if self.client:
+                response = self.client.messages.create(
+                    model=self.model, max_tokens=2000, temperature=0.1,
+                    system=self.SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                content = response.content[0].text
+            else:
+                content = self.provider_client.complete(self.SYSTEM_PROMPT, prompt, 2000)
             result = self._parse_json_object(content)
             if result is None:
                 raise ValueError("Model response contained no parseable JSON object")

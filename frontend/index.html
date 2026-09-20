@@ -53,6 +53,7 @@
         <span class="pill" id="stat-techniques">6 techniques</span>
       </div>
       <button class="btn" id="scan-aws" title="Scan the caller's live AWS account (read-only: GetAccountAuthorizationDetails + GetCallerIdentity)">Scan AWS</button>
+      <button class="btn" data-goto="settings">Settings</button>
       <button class="btn btn-primary" id="reanalyze">Load Demo</button>
     </header>
 
@@ -278,6 +279,47 @@
             <div class="chart-holder" id="chart-priority"></div>
           </div>
         </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" data-view="settings">
+        <div class="settings-intro">
+          <span class="eyebrow">Local connections</span>
+          <h2>Connect AWS and your AI provider</h2>
+          <p>Credentials are saved in <code>backend/.env</code> on this machine. Winnow never displays saved secrets. Removing a connection deletes its saved values from that file.</p>
+        </div>
+        <div class="settings-grid">
+          <form class="panel settings-card" id="aws-settings-form">
+            <div class="panel-head"><div><span class="panel-title">AWS account</span><div class="panel-meta" id="aws-settings-status">Not connected</div></div><span class="tag">Read-only scan</span></div>
+            <div class="panel-body">
+              <p class="settings-copy">Paste credentials for a principal with <code>iam:GetAccountAuthorizationDetails</code> and <code>sts:GetCallerIdentity</code>. Saving verifies the connection and starts a scan.</p>
+              <label class="field-label" for="aws-access-key">Access key ID</label>
+              <input class="settings-input" id="aws-access-key" type="text" autocomplete="off" spellcheck="false" placeholder="AKIA…">
+              <label class="field-label" for="aws-secret-key">Secret access key</label>
+              <input class="settings-input" id="aws-secret-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste secret access key">
+              <label class="field-label" for="aws-session-token">Session token <span>optional</span></label>
+              <input class="settings-input" id="aws-session-token" type="password" autocomplete="new-password" spellcheck="false" placeholder="For temporary credentials">
+              <label class="field-label" for="aws-region">Region</label>
+              <input class="settings-input" id="aws-region" type="text" value="us-east-1" autocomplete="off" spellcheck="false">
+              <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-aws-settings">Save and scan</button><button class="btn btn-danger" type="button" id="remove-aws-settings">Remove account</button></div>
+            </div>
+          </form>
+
+          <form class="panel settings-card" id="ai-settings-form">
+            <div class="panel-head"><div><span class="panel-title">AI assistant</span><div class="panel-meta" id="ai-settings-status">Rule engine only</div></div><span class="tag">Optional</span></div>
+            <div class="panel-body">
+              <p class="settings-copy">Choose a provider for the optional AI finding and remediation pass. The deterministic rule engine remains available without one.</p>
+              <label class="field-label" for="ai-provider">Provider</label>
+              <select class="settings-input" id="ai-provider"><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="ollama">Ollama</option></select>
+              <label class="field-label" for="ai-model">Model <span>optional</span></label>
+              <input class="settings-input" id="ai-model" type="text" autocomplete="off" spellcheck="false" placeholder="Provider default">
+              <div id="ai-key-row"><label class="field-label" for="ai-api-key" id="ai-key-label">API key</label><input class="settings-input" id="ai-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste API key"></div>
+              <div id="ai-base-url-row" hidden><label class="field-label" for="ai-base-url">Ollama URL</label><input class="settings-input" id="ai-base-url" type="url" autocomplete="off" spellcheck="false" value="http://127.0.0.1:11434"></div>
+              <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-ai-settings">Save AI provider</button><button class="btn btn-danger" type="button" id="remove-ai-settings">Remove AI provider</button></div>
+            </div>
+          </form>
+        </div>
+        <div class="source-message settings-message" id="settings-message" role="status" hidden></div>
       </section>
 
     </div>

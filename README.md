@@ -20,7 +20,7 @@ The **IAM Remediation Assistant** is a full-stack security tool that:
 3. **Explains** every detected path with the matched policy evidence, decision
    status, and any conditions or missing context that still need human review.
 4. **Remediates** in a reviewable policy workbench with Original, Proposed, and
-   Diff views, required inputs, and structural validation. Claude is optional;
+   Diff views, required inputs, and structural validation. An AI provider is optional;
    without a key the deterministic engine remains available.
 
 ---
@@ -41,7 +41,7 @@ flowchart TB
         ingest["iam_ingest — config / GAAD → IAMData"]
         grapheng["iam_graph — GraphBuilder → PolicyEvaluator → escalation<br/>21 techniques over the permission graph · FP filters"]
         rules["iam_analyzer.scan_iamdata — supplementary rule scan"]
-        detector["ai_detector — optional Claude second pass"]
+        detector["ai_detector — optional AI second pass"]
         remediator["remediator — cache · AI max 5/req · rule fallback"]
         visualizer["visualizer — permission graph + heatmap + timeline"]
         api --> ingest --> grapheng --> remediator --> visualizer
@@ -49,27 +49,27 @@ flowchart TB
     end
 
     aws[["AWS IAM (read-only)<br/>iam:GetAccountAuthorizationDetails<br/>sts:GetCallerIdentity"]]
-    claude[["Anthropic Claude API<br/>claude-3-haiku-20240307"]]
+    ai[["Optional AI provider<br/>Claude / Ollama / OpenAI / DeepSeek"]]
     note>"Both external calls are optional. No key ⇒ graph + rule engine only.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
 
     sources -->|"POST"| api
     visualizer -->|"response JSON — findings + remediations + visualization + summary"| ui
     api -.->|"boto3, read-only"| aws
-    detector -.-> claude
-    remediator -.->|"uncached calls"| claude
-    claude -.- note
+    detector -.-> ai
+    remediator -.->|"uncached calls"| ai
+    ai -.- note
 
     classDef external stroke:#8957e5,stroke-width:2px
     classDef muted stroke:#3fb950,stroke-width:1px,stroke-dasharray:5 3
-    class aws,claude external
+    class aws,ai external
     class note muted
 ```
 
 Everything runs in one Flask process. `/api/analyze` takes an uploaded or pasted config;
 `/api/scan-account` pulls the caller's live account with **two read-only AWS calls**
 and nothing else. Both feed the same pipeline: build a permission graph → walk the
-escalation techniques → merge a supplementary rule scan → (optionally) a Claude
-pass → remediate → visualize. With no `ANTHROPIC_API_KEY` the AI passes are skipped
+escalation techniques → merge a supplementary rule scan → (optionally) an AI
+pass → remediate → visualize. With no configured AI provider the AI passes are skipped
 and the deterministic engine still produces every finding, remediation, and graph.
 The response includes source metadata and coverage warnings so an empty result is
 shown as an empty result instead of being replaced by sample data.
@@ -81,7 +81,7 @@ shown as an empty result instead of being replaced by sample data.
 ### Prerequisites
 
 - Python 3.10+
-- (Optional) Anthropic API key ([get one here](https://console.anthropic.com/)) for AI-assisted detection and remediation
+- (Optional) API key for Claude, OpenAI, or DeepSeek; or a local Ollama instance, for AI-assisted detection and remediation
 - (Optional) AWS credentials with two read-only permissions, to scan a live account — see [Scan a live AWS account](#scan-a-live-aws-account)
 
 ### Installation
@@ -100,7 +100,7 @@ pip install -r backend/requirements.txt
 
 # Configure environment (optional - the app runs without an API key)
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your ANTHROPIC_API_KEY to enable the AI pass
+# Edit backend/.env or use Settings in the local UI to connect AWS and an AI provider
 
 # Run the application
 cd backend
@@ -122,6 +122,8 @@ paste JSON, or scan the account your credentials point at (read-only — see bel
 Winnow-1.1/
 ├── backend/
 │   ├── app.py              # Flask: routing, security headers, _run_pipeline, /api/scan-account
+│   ├── settings.py          # local AWS/AI connection settings stored in backend/.env
+│   ├── ai_provider.py       # Claude, Ollama, OpenAI, and DeepSeek adapter
 │   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
 │   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
@@ -242,9 +244,14 @@ response.
 ### Environment Variables
 
 ```bash
-# Required for AI features (optional - the tool works fully without it,
-# falling back to the deterministic rule engine)
+# Optional AI features. Set AI_PROVIDER to anthropic, openai, deepseek, or
+# ollama. The Settings screen can write these values for a local installation.
+AI_PROVIDER=anthropic
+AI_MODEL=claude-3-haiku-20240307
 ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=...
+# DEEPSEEK_API_KEY=...
+# OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 # Server
 PORT=5000
@@ -252,7 +259,7 @@ HOST=127.0.0.1          # use 0.0.0.0 only in containers
 FLASK_DEBUG=0           # never set to 1 on a public host (RCE via debugger)
 
 # AI cost/latency controls
-MAX_AI_REMEDIATIONS=5           # max uncached Claude calls per analysis
+MAX_AI_REMEDIATIONS=5           # max uncached AI calls per analysis
 ANTHROPIC_TIMEOUT_SECONDS=30
 REMEDIATOR_MODEL=claude-3-haiku-20240307
 
@@ -269,7 +276,7 @@ AWS_DEFAULT_REGION=us-east-1
 IAM_VULNERABLE_ACCOUNT_ID=123456789012
 ```
 
-> **Note:** Without `ANTHROPIC_API_KEY` the app runs entirely on the built-in
+> **Note:** Without a configured AI provider the app runs entirely on the built-in
 > rule engine. Findings and remediations are still produced; only the
 > "AI Suggested" second-pass detection is skipped.
 
@@ -278,6 +285,10 @@ IAM_VULNERABLE_ACCOUNT_ID=123456789012
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/analyze` | Analyze a pasted IAM config; returns findings, remediations, visualization |
+| `POST` | `/api/scan-account` | Scan the configured AWS account with read-only IAM and STS calls |
+| `GET` | `/api/settings` | Return connection status without exposing credentials |
+| `POST` / `DELETE` | `/api/settings/aws` | Save-and-verify or remove local AWS credentials |
+| `POST` / `DELETE` | `/api/settings/ai` | Save or remove the active local AI provider |
 | `POST` | `/api/scan-account` | Scan the caller's live AWS account (read-only) and analyze it |
 | `POST` | `/api/generate-dummy` | Return the bundled demo config |
 | `GET`  | `/health` | Liveness probe |
@@ -405,5 +416,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 - **Bishop Fox** — For `iam-vulnerable` and privilege escalation research
 - **Seth Art** — Lead researcher on IAM Vulnerable
-- **Anthropic** — For Claude API powering the remediation engine
+- **Anthropic, OpenAI, DeepSeek, and Ollama** — Optional AI providers for assisted analysis
 - **AWS** — For IAM service (and its complexities 😅)

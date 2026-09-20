@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from typing import Dict, List, Any
+from ai_provider import AIProvider
 
 try:
     import anthropic
@@ -66,19 +67,31 @@ Return an empty array [] if there are no additional findings."""
 
     def __init__(self):
         self.client = None
+        self.provider_client = None
+        self.provider_name = os.environ.get('AI_PROVIDER', '').strip().lower()
+        if self.provider_name == 'claude':
+            self.provider_name = 'anthropic'
+        if not self.provider_name:
+            self.provider_name = 'anthropic' if os.environ.get('ANTHROPIC_API_KEY') else ''
         self.api_key = os.environ.get('ANTHROPIC_API_KEY')
-        if self.api_key and ANTHROPIC_AVAILABLE:
+        # Preserve the direct Anthropic path for compatibility with existing
+        # deployments and its SDK's retry behaviour.
+        if self.provider_name == 'anthropic' and self.api_key and ANTHROPIC_AVAILABLE:
             try:
                 self.client = anthropic.Anthropic(api_key=self.api_key)
             except Exception as e:
                 logger.warning(f"Failed to init Anthropic client: {e}")
                 self.client = None
+        elif self.provider_name != 'anthropic':
+            self.provider_client = AIProvider()
+            if not self.provider_client.enabled:
+                logger.info("AI provider is not configured — AI detection pass skipped.")
         else:
             logger.info("No ANTHROPIC_API_KEY set — AI detection pass skipped.")
 
     @property
     def enabled(self) -> bool:
-        return self.client is not None
+        return self.client is not None or (self.provider_client is not None and self.provider_client.enabled)
 
     def detect(self, iam_config: Any, static_findings: List[Dict]) -> List[Dict]:
         if not self.client:
@@ -91,15 +104,15 @@ Return an empty array [] if there are no additional findings."""
                 known=known
             )
 
-            response = self.client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=3000,
-                temperature=0.1,
-                system=self.SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            raw = response.content[0].text
+            if self.client:
+                response = self.client.messages.create(
+                    model=os.environ.get('AI_MODEL', 'claude-3-haiku-20240307'),
+                    max_tokens=3000, temperature=0.1, system=self.SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw = response.content[0].text
+            else:
+                raw = self.provider_client.complete(self.SYSTEM_PROMPT, prompt, 3000)
             items = self._parse_json(raw)
             return self._normalize(items, iam_config)
         except Exception as e:
