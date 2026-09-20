@@ -43,8 +43,9 @@ flowchart TB
         rules["iam_analyzer.scan_iamdata — supplementary rule scan"]
         detector["ai_detector — optional AI second pass"]
         remediator["remediator — cache · AI max 5/req · rule fallback"]
+        brief["risk_brief — evidence-grounded AI executive summary"]
         visualizer["visualizer — permission graph + heatmap + timeline"]
-        api --> ingest --> grapheng --> remediator --> visualizer
+        api --> ingest --> grapheng --> remediator --> visualizer --> brief
         ingest --> rules --> remediator
     end
 
@@ -53,7 +54,7 @@ flowchart TB
     note>"Both external calls are optional. No key ⇒ graph + rule engine only.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
 
     sources -->|"POST"| api
-    visualizer -->|"response JSON — findings + remediations + visualization + summary"| ui
+    brief -->|"response JSON — findings + remediations + visualization + risk brief"| ui
     api -.->|"boto3, read-only"| aws
     detector -.-> ai
     remediator -.->|"uncached calls"| ai
@@ -124,6 +125,7 @@ Winnow-1.1/
 │   ├── app.py              # Flask: routing, security headers, _run_pipeline, /api/scan-account
 │   ├── settings.py          # local AWS/AI connection settings stored in backend/.env
 │   ├── ai_provider.py       # Claude, Ollama, OpenAI, and DeepSeek adapter
+│   ├── risk_brief.py        # grounded AI summary with deterministic metrics and fallback
 │   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
 │   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
@@ -231,6 +233,7 @@ response.
 | Tab | Description |
 |-----|-------------|
 | **Overview** | Source selector, coverage, result state, risk summary, and resource table |
+| **Risk brief rail** | AI-written posture explanation, first action, exposed resources, exact metrics, and scan confidence |
 | **Permissions** | Interactive permission graph with identity, policy, and trust relationships |
 | **Findings** | Sortable, filterable table with every detected issue |
 | **Policy workbench** | Original, Proposed, and Diff views with inputs and validation |

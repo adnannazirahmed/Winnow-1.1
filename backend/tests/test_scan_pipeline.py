@@ -44,6 +44,9 @@ class TestRunPipeline(unittest.TestCase):
             self.assertIn(key, viz)
         self.assertIn('nodes', viz['permission_graph'])
         self.assertGreater(r['summary']['total_vulnerabilities'], 5)
+        self.assertIn('risk_brief', r)
+        self.assertEqual(r['risk_brief']['metrics']['total_findings'], r['summary']['total_vulnerabilities'])
+        self.assertIn(r['risk_brief']['generated_by'], ('ai', 'rules'))
 
     def test_live_source_flag_and_account_id(self):
         iam_data = iam_ingest.parse_gaad(load_fixture("escalation_scenarios.json"), "424242424242")

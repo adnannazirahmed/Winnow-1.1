@@ -132,6 +132,74 @@ a:hover { color: var(--n-ink); }
 }
 .icon-btn:hover { color: var(--n-ink); border-color: var(--n-acc); }
 
+/* ---------- AI risk brief rail ---------- */
+
+.brief-rail {
+  width: 296px; flex: 0 0 296px; height: 100vh; position: sticky; top: 0; z-index: 32;
+  border-right: 1px solid var(--n-line); background: var(--n-sunk);
+  display: flex; flex-direction: column; overflow: hidden;
+  transition: width .2s ease, flex-basis .2s ease;
+}
+.brief-rail.collapsed { width: 43px; flex-basis: 43px; }
+.brief-toggle {
+  min-height: 43px; padding: 10px 13px; border: 0; border-bottom: 1px solid var(--n-line);
+  background: var(--n-panel); color: var(--n-mute); font: 500 11px var(--sans);
+  display: flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap;
+}
+.brief-toggle:hover { color: var(--n-ink); background: var(--n-panel-2); }
+.brief-toggle svg { flex: 0 0 auto; transition: transform .2s ease; }
+.brief-rail.collapsed .brief-toggle { height: 100%; padding: 13px; align-items: flex-start; border-bottom: 0; }
+.brief-rail.collapsed .brief-toggle span { writing-mode: vertical-rl; margin-top: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.brief-rail.collapsed .brief-content { display: none; }
+.brief-content { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.brief-loading { display: flex; flex-direction: column; gap: 5px; padding: 4px 0; }
+.brief-loading strong { font-size: 12px; font-weight: 500; }
+.brief-loading span { color: var(--n-mute); font-size: 11px; }
+.brief-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.brief-kicker, .brief-section-head {
+  font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--n-mute);
+}
+.brief-generator { margin-top: 3px; color: var(--n-ink-2); font-size: 10.5px; text-transform: capitalize; }
+.brief-score { display: flex; align-items: flex-end; gap: 10px; padding: 2px 0 14px; border-bottom: 1px solid var(--n-line); }
+.brief-score strong { font: 300 38px/1 var(--sans); letter-spacing: -.04em; }
+.brief-score span { color: var(--n-mute); font: 10px/1.35 var(--mono); text-transform: uppercase; }
+.brief-score.critical strong { color: var(--n-crit); }
+.brief-score.high strong { color: var(--n-high); }
+.brief-score.medium strong { color: var(--n-med); }
+.brief-score.low strong { color: var(--n-low); }
+.brief-title { font-size: 17px; font-weight: 500; line-height: 1.25; letter-spacing: -.01em; }
+.brief-assessment, .brief-note { margin: -8px 0 0; color: var(--n-mute); font-size: 11px; line-height: 1.55; }
+.brief-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.brief-metrics > div { display: flex; flex-direction: column; gap: 2px; padding: 9px; background: var(--n-panel); border-radius: 8px; }
+.brief-metrics strong { font: 500 16px var(--mono); }
+.brief-metrics span { color: var(--n-mute); font-size: 9.5px; }
+.brief-metrics .sev-critical { color: var(--n-crit); }
+.brief-metrics .sev-high { color: var(--n-high); }
+.brief-section { display: flex; flex-direction: column; gap: 8px; }
+.brief-section-head { display: flex; justify-content: space-between; gap: 8px; }
+.brief-priority {
+  width: 100%; padding: 11px; border: 1px solid color-mix(in oklab, var(--n-crit) 45%, var(--n-line));
+  border-radius: 9px; background: color-mix(in oklab, var(--n-crit) 9%, var(--n-panel));
+  color: var(--n-ink); font-family: var(--sans); text-align: left; cursor: pointer;
+}
+.brief-priority:hover { border-color: var(--n-crit); }
+.brief-priority strong, .brief-priority > span, .brief-priority b { display: block; }
+.brief-priority strong { font-size: 12px; font-weight: 500; }
+.brief-priority > span { margin-top: 3px; color: var(--n-mute); font: 9.5px var(--mono); }
+.brief-priority p { margin: 8px 0; color: var(--n-mute); font-size: 10.5px; line-height: 1.45; }
+.brief-priority b { color: var(--n-ink-2); font-size: 10.5px; font-weight: 500; }
+.brief-resources { display: flex; flex-direction: column; gap: 9px; }
+.brief-resource { display: flex; flex-direction: column; gap: 5px; }
+.brief-resource > div { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; }
+.brief-resource > div span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brief-resource > div b { color: var(--n-mute); font: 10px var(--mono); }
+.brief-resource > i { display: block; height: 4px; border-radius: 999px; overflow: hidden; background: var(--n-panel); }
+.brief-resource > i span { display: block; height: 100%; border-radius: inherit; background: var(--n-crit); }
+.brief-confidence { margin-top: auto; padding-top: 13px; border-top: 1px solid var(--n-line); }
+.brief-confidence > div { display: flex; align-items: center; gap: 7px; }
+.brief-confidence strong { font-size: 10.5px; font-weight: 500; }
+.brief-confidence p { margin: 6px 0 0; color: var(--n-mute); font-size: 10px; line-height: 1.45; }
+
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .topbar {
@@ -583,6 +651,11 @@ tbody tr:hover { background: var(--n-acc-dim); }
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
+@media (max-width: 1100px) and (min-width: 761px) {
+  .sidebar { width: 194px; flex-basis: 194px; }
+  .brief-rail { width: 252px; flex-basis: 252px; }
+}
+
 @media (max-width: 760px) {
   .shell { display: block; }
   .sidebar {
@@ -594,6 +667,13 @@ tbody tr:hover { background: var(--n-acc-dim); }
   .nav-item { min-width: 0; padding: 7px; gap: 6px; }
   .nav-item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sidebar-foot { margin-top: 0; flex-direction: row; }
+  .brief-rail, .brief-rail.collapsed {
+    position: relative; width: 100%; height: auto; max-height: none; flex-basis: auto;
+    border-right: 0; border-bottom: 1px solid var(--n-line);
+  }
+  .brief-rail.collapsed .brief-toggle { height: 43px; padding: 10px 13px; align-items: center; }
+  .brief-rail.collapsed .brief-toggle span { writing-mode: horizontal-tb; margin-top: 0; letter-spacing: normal; text-transform: none; }
+  .brief-content { max-height: none; }
   .search-trigger { flex: 1; }
   .status-row { flex: 1; min-width: 0; }
   .topbar { position: relative; padding: 12px 16px; }

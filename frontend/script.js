@@ -113,6 +113,16 @@
     warnings: ['Backend unavailable; showing the bundled offline sample.']
   };
   DEMO_RESULT.aiStatus = 'disabled';
+  DEMO_RESULT.riskBrief = {
+    generated_by: 'rules', provider: '', risk_score: 100,
+    headline: 'Critical IAM escalation exposure',
+    assessment: 'Winnow found 21 findings across 5 identities. Twelve critical paths require immediate review.',
+    business_impact: 'A compromised principal could attach or create policies that grant administrator access.',
+    metrics: { total_findings: 21, critical: 12, high: 6, medium: 3, low: 0, escalation_paths: 12, identities: 5, policies: 3 },
+    top_priority: { finding_id: 'VULN-0001', title: 'User Can Attach Admin Policy', severity: 'CRITICAL', resource: AP, reason: 'This permission can directly grant AdministratorAccess.', next_action: 'Restrict policy attachment to approved policy ARNs.' },
+    key_risks: [], most_exposed_resources: [{ name: AP, risk_score: 100, total_findings: 13 }, { name: CU, risk_score: 58, total_findings: 3 }, { name: LP, risk_score: 55, total_findings: 3 }],
+    confidence: { level: 'high', explanation: 'Complete coverage for the bundled sample.', limitations: [] }
+  };
 
   /* Offline-only remediation copy. When the API answers, the backend's own
      Remediator output is used instead of this table. */
@@ -185,7 +195,8 @@
     currentPolicy: null,
     requestSerial: 0,
     uploadedFileName: '',
-    settings: null
+    settings: null,
+    briefCollapsed: localStorage.getItem('winnow-brief-collapsed') === '1'
   };
 
   var hero = null, graph = null;
@@ -334,7 +345,8 @@
       identityCount: Number(summary.identity_count) || 0,
       policyCount: Number(summary.policy_count) || 0,
       coverage: summary.coverage || { complete: true, warnings: [] },
-      aiStatus: summary.ai_status || 'disabled'
+      aiStatus: summary.ai_status || 'disabled',
+      riskBrief: payload.risk_brief || null
     };
   }
 
@@ -379,6 +391,61 @@
       '<span class="context-sep">·</span><span>' + esc(d.identityCount) + ' identities</span>' +
       '<span class="context-sep">·</span><span>' + esc(d.policyCount) + ' policies</span>' +
       (warnings.length ? '<span class="context-warning">' + esc(warnings.length) + ' coverage note' + (warnings.length === 1 ? '' : 's') + '</span>' : '');
+  }
+
+  function renderRiskBrief() {
+    var rail = $('brief-rail');
+    var toggle = $('brief-toggle');
+    rail.classList.toggle('collapsed', state.briefCollapsed);
+    toggle.setAttribute('aria-expanded', state.briefCollapsed ? 'false' : 'true');
+    toggle.setAttribute('aria-label', state.briefCollapsed ? 'Expand risk brief' : 'Collapse risk brief');
+    toggle.querySelector('svg').style.transform = state.briefCollapsed ? 'rotate(180deg)' : '';
+    if (state.briefCollapsed) return;
+
+    var host = $('brief-content');
+    if (state.analysisStatus === 'loading') {
+      host.innerHTML = '<div class="brief-loading"><strong>Building risk brief…</strong><span>Summarizing findings, paths, and remediations.</span></div>';
+      return;
+    }
+    var brief = state.data.riskBrief;
+    if (!brief) {
+      host.innerHTML = '<div class="brief-loading"><strong>Risk brief unavailable</strong><span>Run an analysis to generate the summary.</span></div>';
+      return;
+    }
+
+    var metrics = brief.metrics || {};
+    var priority = brief.top_priority;
+    var resources = brief.most_exposed_resources || [];
+    var confidence = brief.confidence || {};
+    var score = Math.max(0, Math.min(100, Number(brief.risk_score) || 0));
+    var generator = brief.generated_by === 'ai'
+      ? ((brief.provider === 'anthropic' ? 'Claude' : brief.provider || 'AI') + ' · evidence grounded')
+      : 'Rule summary · AI unavailable';
+    var severityClass = score >= 80 ? 'critical' : score >= 55 ? 'high' : score > 0 ? 'medium' : 'low';
+
+    host.innerHTML =
+      '<div class="brief-head"><div><div class="brief-kicker">Current analysis</div><div class="brief-generator">' + esc(generator) + '</div></div><span class="tag">' + esc(brief.generated_by === 'ai' ? 'AI brief' : 'Fallback') + '</span></div>' +
+      '<div class="brief-score ' + severityClass + '"><strong>' + esc(score) + '</strong><span>risk<br>out of 100</span></div>' +
+      '<div class="brief-title">' + esc(brief.headline || 'Risk summary') + '</div>' +
+      '<p class="brief-assessment">' + esc(brief.assessment || '') + '</p>' +
+      '<div class="brief-metrics">' +
+        '<div><strong class="sev-critical">' + esc(metrics.critical || 0) + '</strong><span>Critical</span></div>' +
+        '<div><strong class="sev-high">' + esc(metrics.high || 0) + '</strong><span>High</span></div>' +
+        '<div><strong>' + esc(metrics.escalation_paths || 0) + '</strong><span>Paths</span></div>' +
+      '</div>' +
+      (priority ? '<div class="brief-section"><div class="brief-section-head"><span>Act first</span><span>' + esc(priority.finding_id) + '</span></div>' +
+        '<button class="brief-priority" type="button" data-brief-finding="' + esc(priority.finding_id) + '">' +
+          '<strong>' + esc(priority.title) + '</strong><span>' + esc(priority.resource) + ' · ' + esc(priority.severity) + '</span>' +
+          '<p>' + esc(priority.reason || '') + '</p><b>' + esc(priority.next_action || 'Review remediation') + ' →</b>' +
+        '</button></div>' : '') +
+      '<div class="brief-section"><div class="brief-section-head"><span>Most exposed</span><span>Risk</span></div><div class="brief-resources">' +
+        resources.slice(0, 3).map(function (resource) {
+          var resourceScore = Math.max(0, Math.min(100, Number(resource.risk_score) || 0));
+          return '<div class="brief-resource"><div><span>' + esc(resource.name) + '</span><b>' + esc(resourceScore) + '</b></div><i><span style="width:' + resourceScore + '%"></span></i></div>';
+        }).join('') +
+      '</div></div>' +
+      '<div class="brief-section"><div class="brief-section-head"><span>Impact</span></div><p class="brief-note">' + esc(brief.business_impact || '') + '</p></div>' +
+      '<div class="brief-confidence"><div><span class="status-dot"></span><strong>' + esc(confidence.level === 'high' ? 'High confidence' : 'Coverage limits') + '</strong></div><p>' + esc(confidence.explanation || '') + '</p></div>';
   }
 
   function renderSourcePanel() {
@@ -1013,7 +1080,7 @@
     renderNav(); renderTopbar();
     renderOverview(); renderInspector(); renderFindings();
     renderRemediation(); renderVisualizer(); renderCharts();
-    renderGraphDetail(); renderSettings();
+    renderGraphDetail(); renderSettings(); renderRiskBrief();
   }
 
   function applyTheme() {
@@ -1037,6 +1104,7 @@
     renderSourcePanel();
     renderResultState();
     renderAnalysisContext();
+    renderRiskBrief();
     return state.requestSerial;
   }
 
@@ -1235,6 +1303,21 @@
   document.addEventListener('click', function (e) {
     var sourceTab = e.target.closest('[data-source-tab]');
     if (sourceTab) { state.sourceTab = sourceTab.getAttribute('data-source-tab'); state.analysisError = ''; renderSourcePanel(); return; }
+
+    var briefFinding = e.target.closest('[data-brief-finding]');
+    if (briefFinding) {
+      state.selId = briefFinding.getAttribute('data-brief-finding');
+      state.policyView = 'diff';
+      renderInspector(); renderRemediation(); goTo('remediation');
+      return;
+    }
+
+    if (e.target.closest('#brief-toggle')) {
+      state.briefCollapsed = !state.briefCollapsed;
+      localStorage.setItem('winnow-brief-collapsed', state.briefCollapsed ? '1' : '0');
+      renderRiskBrief();
+      return;
+    }
 
     var pathSelect = e.target.closest('[data-path-select]');
     if (pathSelect) { state.selectedPath = pathSelect.getAttribute('data-path-select'); state.selectedEvidence = 0; renderVisualizer(); return; }

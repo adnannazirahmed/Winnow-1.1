@@ -11,6 +11,7 @@ from visualizer import Visualizer
 import iam_ingest
 import iam_graph
 from graph_to_findings import graph_to_findings
+from risk_brief import RiskBriefGenerator
 import settings
 
 load_dotenv()
@@ -37,15 +38,17 @@ analyzer = IAMAnalyzer()
 ai_detector = AIDetector()
 remediator = Remediator()
 visualizer = Visualizer()
+risk_brief_generator = RiskBriefGenerator()
 
 _SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
 
 
 def _refresh_ai_components():
     """Apply a settings change without requiring the user to restart Flask."""
-    global ai_detector, remediator
+    global ai_detector, remediator, risk_brief_generator
     ai_detector = AIDetector()
     remediator = Remediator()
+    risk_brief_generator = RiskBriefGenerator()
 
 
 def _settings_write_allowed():
@@ -141,31 +144,37 @@ def _run_pipeline(iam_data, source='static', source_name=None):
     def _count(sev):
         return len([v for v in vulnerabilities if v.get('severity') == sev])
 
+    summary = {
+        'total_vulnerabilities': len(vulnerabilities),
+        'critical': _count('CRITICAL'),
+        'high': _count('HIGH'),
+        'medium': _count('MEDIUM'),
+        'low': _count('LOW'),
+        'ai_suggested': len([v for v in vulnerabilities if v.get('detection_source') == 'ai']),
+        'graph_detected': len([v for v in vulnerabilities if v.get('detection_source') == 'graph']),
+        'escalation_paths': graph_output.metadata.escalation_count,
+        'source': graph_output.metadata.source,
+        'source_name': source_name,
+        'account_id': iam_data.account_id,
+        'identity_count': len(iam_data.users) + len(iam_data.roles) + len(iam_data.groups),
+        'policy_count': len(iam_data.policies) + sum(
+            len(entity.inline_policies)
+            for entities in (iam_data.users, iam_data.roles, iam_data.groups)
+            for entity in entities
+        ),
+        'coverage': iam_data.coverage.model_dump(mode='json'),
+        'ai_status': 'enabled' if ai_detector.enabled else 'disabled',
+    }
+    risk_brief = risk_brief_generator.generate(
+        summary, vulnerabilities, remediation_results, visualization_data
+    )
+
     return {
         'vulnerabilities': vulnerabilities,
         'remediations': remediation_results,
         'visualization': visualization_data,
-        'summary': {
-            'total_vulnerabilities': len(vulnerabilities),
-            'critical': _count('CRITICAL'),
-            'high': _count('HIGH'),
-            'medium': _count('MEDIUM'),
-            'low': _count('LOW'),
-            'ai_suggested': len([v for v in vulnerabilities if v.get('detection_source') == 'ai']),
-            'graph_detected': len([v for v in vulnerabilities if v.get('detection_source') == 'graph']),
-            'escalation_paths': graph_output.metadata.escalation_count,
-            'source': graph_output.metadata.source,
-            'source_name': source_name,
-            'account_id': iam_data.account_id,
-            'identity_count': len(iam_data.users) + len(iam_data.roles) + len(iam_data.groups),
-            'policy_count': len(iam_data.policies) + sum(
-                len(entity.inline_policies)
-                for entities in (iam_data.users, iam_data.roles, iam_data.groups)
-                for entity in entities
-            ),
-            'coverage': iam_data.coverage.model_dump(mode='json'),
-            'ai_status': 'enabled' if ai_detector.enabled else 'disabled',
-        },
+        'summary': summary,
+        'risk_brief': risk_brief,
     }
 
 
