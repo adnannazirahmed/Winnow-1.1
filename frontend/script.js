@@ -1243,6 +1243,7 @@
     renderOverview(); renderInspector(); renderFindings();
     renderRemediation(); renderVisualizer(); renderOrganization(); renderCharts();
     renderGraphDetail(); renderSettings(); renderRiskBrief();
+    configureStaticPreview();
   }
 
   function applyTheme() {
