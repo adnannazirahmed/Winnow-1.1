@@ -501,6 +501,25 @@
     host.style.color = error ? 'var(--n-crit)' : 'var(--n-ink-2)';
   }
 
+  function configureStaticPreview() {
+    if (!STATIC_PREVIEW) return;
+    ['aws-settings-form', 'ai-settings-form'].forEach(function (formId) {
+      var form = $(formId);
+      if (!form) return;
+      Array.prototype.forEach.call(form.querySelectorAll('input, select, button'), function (control) {
+        control.disabled = true;
+      });
+    });
+    ['scan-aws', 'scan-organization', 'analyze-upload'].forEach(function (id) {
+      var control = $(id);
+      if (control) control.disabled = true;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-scan-aws]'), function (control) {
+      control.disabled = true;
+    });
+    setSettingsMessage(STATIC_PREVIEW_MESSAGE, true);
+  }
+
   var AI_URL_DEFAULTS = {
     anthropic: 'https://api.anthropic.com',
     openai: 'https://api.openai.com/v1',
@@ -1630,6 +1649,7 @@
 
   applyTheme();
   renderAll();
+  configureStaticPreview();
   /* Default the hash BEFORE using it: on a plain visit location.hash is '',
      and the old one-liner tested the defaulted value but passed the raw one,
      so goTo('') matched no section and the whole app booted blank. */
