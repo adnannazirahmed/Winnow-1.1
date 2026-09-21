@@ -31,6 +31,11 @@
   'use strict';
 
   var API = '/api/analyze';
+  /* GitHub Pages is an offline preview. Keep credentials, uploaded policy
+     documents, and scan requests inside the browser instead of sending them
+     to a host that does not run Winnow's backend. */
+  var STATIC_PREVIEW = /(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:';
+  var STATIC_PREVIEW_MESSAGE = 'Static demo mode: no AWS, AI, or uploaded data is sent from this site.';
 
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
   var SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
@@ -1299,6 +1304,11 @@
   }
 
   function postJSON(path, body) {
+    if (STATIC_PREVIEW) {
+      var blockedPost = new Error(STATIC_PREVIEW_MESSAGE);
+      blockedPost.staticPreview = true;
+      return Promise.reject(blockedPost);
+    }
     return fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1323,6 +1333,11 @@
   }
 
   function requestJSON(path, method, body) {
+    if (STATIC_PREVIEW) {
+      var blockedRequest = new Error(STATIC_PREVIEW_MESSAGE);
+      blockedRequest.staticPreview = true;
+      return Promise.reject(blockedRequest);
+    }
     return fetch(path, {
       method: method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -1336,6 +1351,7 @@
   }
 
   function loadSettings() {
+    if (STATIC_PREVIEW) return;
     fetch('/api/settings').then(function (r) { return r.json(); }).then(function (payload) {
       state.settings = payload;
       renderSettings();
@@ -1343,6 +1359,7 @@
   }
 
   function loadOrganization() {
+    if (STATIC_PREVIEW) return;
     fetch('/api/organization').then(function (r) { return r.json(); }).then(function (payload) {
       if (!payload.available || !payload.inventory) return;
       state.organization = payload.inventory;
@@ -1352,6 +1369,11 @@
   }
 
   function scanOrganization() {
+    if (STATIC_PREVIEW) {
+      state.organizationError = STATIC_PREVIEW_MESSAGE;
+      renderOrganization();
+      return;
+    }
     state.organizationStatus = 'loading';
     state.organizationError = '';
     $('status-text').textContent = 'Scanning AWS organization…';
@@ -1379,6 +1401,7 @@
   }
 
   function saveAWSSettings() {
+    if (STATIC_PREVIEW) { setSettingsMessage(STATIC_PREVIEW_MESSAGE, true); return; }
     setSettingsMessage('', false);
     setButtonBusy('save-aws-settings', true, 'Verifying…', 'Save and scan');
     requestJSON('/api/settings/aws', 'POST', {
@@ -1405,6 +1428,7 @@
   }
 
   function removeAWSSettings() {
+    if (STATIC_PREVIEW) { setSettingsMessage(STATIC_PREVIEW_MESSAGE, true); return; }
     requestJSON('/api/settings/aws', 'DELETE').then(function (payload) {
       state.settings = payload.settings;
       $('aws-access-key').value = ''; $('aws-secret-key').value = ''; $('aws-session-token').value = ''; $('aws-organization-role').value = '';
@@ -1413,6 +1437,7 @@
   }
 
   function saveAISettings() {
+    if (STATIC_PREVIEW) { setSettingsMessage(STATIC_PREVIEW_MESSAGE, true); return; }
     setSettingsMessage('', false);
     setButtonBusy('save-ai-settings', true, 'Verifying…', 'Verify and save');
     requestJSON('/api/settings/ai', 'POST', {
@@ -1427,6 +1452,7 @@
   }
 
   function removeAISettings() {
+    if (STATIC_PREVIEW) { setSettingsMessage(STATIC_PREVIEW_MESSAGE, true); return; }
     requestJSON('/api/settings/ai', 'DELETE').then(function (payload) {
       state.settings = payload.settings;
       $('ai-api-key').value = ''; $('ai-model').value = '';
@@ -1435,6 +1461,11 @@
   }
 
   function scanAccount() {
+    if (STATIC_PREVIEW) {
+      state.analysisError = STATIC_PREVIEW_MESSAGE;
+      renderSourcePanel();
+      return;
+    }
     state.sourceTab = 'live';
     var requestId = beginAnalysis('Scanning AWS account…');
     var btn = document.getElementById('scan-aws');
@@ -1448,6 +1479,11 @@
   }
 
   function analyzeUpload() {
+    if (STATIC_PREVIEW) {
+      state.analysisError = STATIC_PREVIEW_MESSAGE;
+      renderSourcePanel();
+      return;
+    }
     var text = $('config-input').value.trim();
     if (!text) {
       state.analysisError = 'Choose a JSON file or paste a JSON document.';
