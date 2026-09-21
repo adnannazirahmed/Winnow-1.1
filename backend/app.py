@@ -13,6 +13,10 @@ import iam_graph
 from graph_to_findings import graph_to_findings
 from risk_brief import RiskBriefGenerator
 from ai_provider import AIConnectionError, AIProvider
+from organization_intelligence import (
+    InventorySnapshotStore,
+    build_organization_intelligence,
+)
 import settings
 
 load_dotenv()
@@ -40,6 +44,7 @@ ai_detector = AIDetector()
 remediator = Remediator()
 visualizer = Visualizer()
 risk_brief_generator = RiskBriefGenerator()
+inventory_store = InventorySnapshotStore()
 
 _SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
 
@@ -169,6 +174,27 @@ def _run_pipeline(iam_data, source='static', source_name=None):
     risk_brief = risk_brief_generator.generate(
         summary, vulnerabilities, remediation_results, visualization_data
     )
+    organization = build_organization_intelligence(
+        [{
+            'account': {
+                'account_id': iam_data.account_id,
+                'name': source_name or ('Connected account' if source == 'live' else 'Current analysis'),
+                'state': 'ACTIVE',
+            },
+            'iam_data': iam_data,
+            'credential_rows': [],
+        }],
+        discovered_accounts=[{
+            'account_id': iam_data.account_id,
+            'name': source_name or ('Connected account' if source == 'live' else 'Current analysis'),
+            'state': 'ACTIVE',
+            'scanned': True,
+        }],
+        warnings=([] if source == 'live' else [
+            'This inventory reflects the current analysis input, not an AWS Organizations scan.'
+        ]),
+        source=source,
+    )
 
     return {
         'vulnerabilities': vulnerabilities,
@@ -176,6 +202,7 @@ def _run_pipeline(iam_data, source='static', source_name=None):
         'visualization': visualization_data,
         'summary': summary,
         'risk_brief': risk_brief,
+        'organization_intelligence': organization,
     }
 
 
@@ -258,6 +285,84 @@ def generate_dummy():
     except Exception:
         logger.exception("Dummy generation error")
         return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/organization', methods=['GET'])
+def latest_organization_inventory():
+    try:
+        latest = inventory_store.latest_any()
+    except Exception:
+        logger.exception('Could not read the saved organization inventory')
+        return jsonify({'available': False, 'error': 'Saved organization inventory is unavailable.'}), 500
+    return jsonify({'available': bool(latest), 'inventory': latest})
+
+
+@app.route('/api/organization/scan', methods=['POST'])
+def scan_organization():
+    """Build a read-only identity inventory across discoverable AWS accounts."""
+    try:
+        import aws_collector
+    except Exception:
+        return jsonify({'error': 'AWS organization scanning unavailable: boto3 is not installed'}), 501
+
+    role_name = os.environ.get('AWS_ORGANIZATION_ROLE_NAME', '').strip()
+    try:
+        maximum = max(1, int(os.environ.get('MAX_ORGANIZATION_ACCOUNTS', '100')))
+    except ValueError:
+        maximum = 100
+    try:
+        collected = aws_collector.collect_organization_inventory(role_name, maximum)
+    except aws_collector.BotoNotInstalled:
+        return jsonify({'error': 'AWS organization scanning unavailable: boto3 is not installed'}), 501
+    except aws_collector.NoCredentials:
+        return jsonify({'error': 'No valid AWS credentials are connected.'}), 400
+    except aws_collector.Throttled:
+        return jsonify({'error': 'AWS throttled the organization scan. Try again shortly.'}), 429
+    except aws_collector.CollectorError:
+        return jsonify({'error': 'AWS organization discovery failed for the connected credentials.'}), 502
+    except Exception:
+        logger.exception('AWS organization collection failed')
+        return jsonify({'error': 'AWS organization collection failed. Check the server logs.'}), 502
+
+    scanned_accounts = []
+    parse_warnings = []
+    for item in collected.get('scanned', []):
+        account = item.get('account') or {}
+        account_id = str(account.get('account_id') or '000000000000')
+        try:
+            scanned_accounts.append({
+                'account': account,
+                'iam_data': iam_ingest.parse_gaad(item.get('raw') or {}, account_id),
+                'credential_rows': item.get('credential_rows') or [],
+            })
+        except Exception:
+            parse_warnings.append(
+                f'Winnow could not parse the IAM inventory for account {account_id}.'
+            )
+
+    scope_key = str(collected.get('scope_key') or 'connected-account')
+    warnings = list(collected.get('warnings') or []) + parse_warnings
+    try:
+        previous = inventory_store.latest(scope_key)
+    except Exception:
+        previous = None
+        warnings.append('The previous local snapshot could not be read, so change detection is unavailable.')
+    inventory = build_organization_intelligence(
+        scanned_accounts,
+        discovered_accounts=collected.get('accounts') or [],
+        warnings=warnings,
+        previous=previous,
+        source='aws-organization',
+    )
+    try:
+        inventory_store.save(scope_key, inventory)
+    except Exception:
+        logger.exception('Could not save organization inventory snapshot')
+        inventory['coverage']['warnings'].append(
+            'This scan succeeded but its local comparison snapshot could not be saved.'
+        )
+        inventory['coverage']['complete'] = False
+    return jsonify(inventory)
 
 
 # ──────────────────────────────────────────────

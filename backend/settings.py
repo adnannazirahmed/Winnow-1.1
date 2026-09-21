@@ -15,7 +15,7 @@ from dotenv import dotenv_values, set_key, unset_key
 
 ENV_FILE = Path(__file__).with_name('.env')
 AWS_KEYS = ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
-            'AWS_DEFAULT_REGION', 'AWS_PROFILE')
+            'AWS_DEFAULT_REGION', 'AWS_PROFILE', 'AWS_ORGANIZATION_ROLE_NAME')
 AI_KEY_BY_PROVIDER = {
     'anthropic': 'ANTHROPIC_API_KEY',
     'openai': 'OPENAI_API_KEY',
@@ -43,6 +43,7 @@ AI_DEFAULT_MODELS = {
 }
 _AWS_ACCESS_KEY = re.compile(r'^[A-Z0-9]{16,128}$')
 _AWS_REGION = re.compile(r'^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+$')
+_AWS_ROLE_NAME = re.compile(r'^[A-Za-z0-9+=,.@_/-]{1,128}$')
 
 
 def _env_file_values() -> Dict[str, str]:
@@ -77,6 +78,9 @@ def save_aws_credentials(data: Dict[str, object]) -> None:
     secret_access_key = _clean(data.get('secret_access_key'), 'AWS secret access key', 256)
     session_token = _clean(data.get('session_token'), 'AWS session token', 4096)
     region = _clean(data.get('region'), 'AWS region', 64) or 'us-east-1'
+    organization_role_name = _clean(
+        data.get('organization_role_name'), 'Organization audit role', 128
+    )
 
     if not access_key_id or not secret_access_key:
         raise ValueError('Enter both an AWS access key ID and secret access key')
@@ -84,6 +88,8 @@ def save_aws_credentials(data: Dict[str, object]) -> None:
         raise ValueError('AWS access key ID has an invalid format')
     if not _AWS_REGION.fullmatch(region):
         raise ValueError('AWS region has an invalid format')
+    if organization_role_name and not _AWS_ROLE_NAME.fullmatch(organization_role_name):
+        raise ValueError('Organization audit role has an invalid format')
 
     updates = {
         'AWS_ACCESS_KEY_ID': access_key_id,
@@ -95,6 +101,10 @@ def save_aws_credentials(data: Dict[str, object]) -> None:
         updates['AWS_SESSION_TOKEN'] = session_token
     else:
         removals += ('AWS_SESSION_TOKEN',)
+    if organization_role_name:
+        updates['AWS_ORGANIZATION_ROLE_NAME'] = organization_role_name.lstrip('/')
+    else:
+        removals += ('AWS_ORGANIZATION_ROLE_NAME',)
     _save(updates, removals)
 
 
@@ -171,6 +181,7 @@ def public_settings() -> Dict[str, object]:
             'configured': aws_configured,
             'managed_by_winnow': bool(file_values.get('AWS_ACCESS_KEY_ID') and file_values.get('AWS_SECRET_ACCESS_KEY')),
             'region': os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'),
+            'organization_role_name': os.environ.get('AWS_ORGANIZATION_ROLE_NAME', ''),
             'access_key_hint': ('…' + os.environ['AWS_ACCESS_KEY_ID'][-4:]) if aws_configured else '',
         },
         'ai': {

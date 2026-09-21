@@ -44,9 +44,11 @@ flowchart TB
         detector["ai_detector — optional AI second pass"]
         remediator["remediator — cache · AI max 5/req · rule fallback"]
         brief["risk_brief — evidence-grounded AI executive summary"]
+        org["organization_intelligence — identities · credential hygiene · change history"]
         visualizer["visualizer — permission graph + heatmap + timeline"]
         api --> ingest --> grapheng --> remediator --> visualizer --> brief
         ingest --> rules --> remediator
+        api --> org
     end
 
     aws[["AWS IAM (read-only)<br/>iam:GetAccountAuthorizationDetails<br/>sts:GetCallerIdentity"]]
@@ -74,6 +76,11 @@ pass → remediate → visualize. With no configured AI provider the AI passes a
 and the deterministic engine still produces every finding, remediation, and graph.
 The response includes source metadata and coverage warnings so an empty result is
 shown as an empty result instead of being replaced by sample data.
+
+`/api/organization/scan` optionally discovers AWS Organizations accounts, assumes
+one configured read-only role in member accounts, collects IAM and credential
+inventory, and saves a bounded local SQLite history. The Organization view uses
+that history to identify new accounts and identities without requiring AI.
 
 ---
 
@@ -126,6 +133,7 @@ Winnow-1.1/
 │   ├── settings.py          # local AWS/AI connection settings stored in backend/.env
 │   ├── ai_provider.py       # Claude, Ollama, OpenAI, and DeepSeek adapter
 │   ├── risk_brief.py        # grounded AI summary with deterministic metrics and fallback
+│   ├── organization_intelligence.py # identity inventory, anomaly rules, local snapshots
 │   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
 │   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
@@ -301,6 +309,8 @@ configuration only when the URL, API key, and model work together.
 | `POST` / `DELETE` | `/api/settings/aws` | Save-and-verify or remove local AWS credentials |
 | `POST` / `DELETE` | `/api/settings/ai` | Verify and save, or remove, the active local AI provider and its provider URL |
 | `POST` | `/api/scan-account` | Scan the caller's live AWS account (read-only) and analyze it |
+| `GET` | `/api/organization` | Return the latest saved organization inventory, when available |
+| `POST` | `/api/organization/scan` | Discover accounts and build a read-only identity/anomaly inventory |
 | `POST` | `/api/generate-dummy` | Return the bundled demo config |
 | `GET`  | `/health` | Liveness probe |
 
@@ -333,6 +343,47 @@ starting the app. With no credentials the scan returns a clean `400` and pasted
 configs keep working. AWS-managed policy bodies (`arn:aws:iam::aws:policy/*`) are
 not included in `GetAccountAuthorizationDetails`, so their permissions are not
 visible to the graph engine — a known limitation.
+
+### Organization intelligence
+
+The **Organization** view inventories users, groups, roles, policy attachments,
+inline policies, role trust principals, and credential hygiene. Deterministic
+checks flag administrator access, direct user policies, users outside groups,
+console access without MFA, old or inactive access keys, external role trust,
+wildcard trust, and unattached customer policies. Each scan is stored locally in
+`backend/winnow_inventory.db`; after the first baseline, Winnow also flags new
+accounts and identities.
+
+The connected account needs these additional reporting permissions for the full
+credential and account inventory:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "organizations:ListAccounts",
+      "iam:GetAccountAuthorizationDetails",
+      "iam:GenerateCredentialReport",
+      "iam:GetCredentialReport",
+      "sts:GetCallerIdentity",
+      "sts:AssumeRole"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+For member-account coverage, deploy the same read-only role in each member account
+and set its name in **Settings → Cross-account audit role**, or set
+`AWS_ORGANIZATION_ROLE_NAME=WinnowAuditRole`. If Organizations access or the role
+is unavailable, Winnow returns the connected account and clearly marks every
+unscanned account and coverage limitation. `MAX_ORGANIZATION_ACCOUNTS` defaults
+to 100 to bound scan time.
+
+Winnow uses the term “new” or “unmanaged” until a saved baseline exists. It does
+not label an account or identity as shadow IT solely because it appears in AWS.
 
 ### Running Tests
 

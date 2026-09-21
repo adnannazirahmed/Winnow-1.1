@@ -196,6 +196,13 @@
     requestSerial: 0,
     uploadedFileName: '',
     settings: null,
+    organization: null,
+    organizationLocked: false,
+    organizationStatus: 'idle',
+    organizationError: '',
+    orgQuery: '',
+    orgType: 'ALL',
+    orgSeverity: 'ALL',
     briefCollapsed: localStorage.getItem('winnow-brief-collapsed') === '1'
   };
 
@@ -207,15 +214,24 @@
     ['findings', 'Findings', ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8']],
     ['remediation', 'Remediation', ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z']],
     ['visualizer', 'Path explorer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
+    ['organization', 'Organization', ['M3 21h18', 'M5 21V8l7-5 7 5v13', 'M9 21v-6h6v6', 'M8 10h.01', 'M12 10h.01', 'M16 10h.01']],
     ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']],
     ['settings', 'Settings', ['M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z', 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.42 2.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.6h-3.4v-.08A1.7 1.7 0 0 0 9.96 19a1.7 1.7 0 0 0-1.88.34l-.06.06-2.42-2.42.06-.06A1.7 1.7 0 0 0 6 15.04 1.7 1.7 0 0 0 4.44 14H4.36v-3.4h.08A1.7 1.7 0 0 0 6 9.56a1.7 1.7 0 0 0-.34-1.88L5.6 7.62 8.02 5.2l.06.06A1.7 1.7 0 0 0 9.96 5.6 1.7 1.7 0 0 0 11 4.04v-.08h3.4v.08A1.7 1.7 0 0 0 15.44 5.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.42 2.42-.06.06A1.7 1.7 0 0 0 19.4 9.56 1.7 1.7 0 0 0 20.96 10.6h.08V14h-.08A1.7 1.7 0 0 0 19.4 15z']]
   ];
-  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', charts: 'Charts', settings: 'Settings' };
+  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', organization: 'Organization intelligence', charts: 'Charts', settings: 'Settings' };
 
   /* ---------------- helpers ---------------- */
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  function emptyOrganization() {
+    return {
+      generated_at: '', source: 'analysis', accounts: [], identities: [], policies: [], anomalies: [],
+      overview: { accounts_discovered: 0, accounts_scanned: 0, users: 0, groups: 0, roles: 0, policies: 0, anomalies: 0, critical: 0, high: 0, credential_reports: 0 },
+      changes: { baseline_available: false, new_identities: [], removed_identities: [], new_accounts: [] },
+      coverage: { complete: false, warnings: ['Run an AWS organization scan to create an identity baseline.'] }
+    };
+  }
   function icon(paths, size) {
     return '<svg width="' + (size || 14) + '" height="' + (size || 14) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
       paths.map(function (d) { return '<path d="' + d + '"/>'; }).join('') + '</svg>';
@@ -346,7 +362,8 @@
       policyCount: Number(summary.policy_count) || 0,
       coverage: summary.coverage || { complete: true, warnings: [] },
       aiStatus: summary.ai_status || 'disabled',
-      riskBrief: payload.risk_brief || null
+      riskBrief: payload.risk_brief || null,
+      organization: payload.organization_intelligence || emptyOrganization()
     };
   }
 
@@ -358,6 +375,7 @@
       var count = id === 'findings' ? state.data.findings.length
         : id === 'remediation' ? state.data.queue.length
         : id === 'visualizer' ? state.data.escalationPaths
+        : id === 'organization' ? ((state.organization && state.organization.overview && state.organization.overview.anomalies) || '')
         : id === 'graph' ? '3D' : '';
       return '<button class="nav-item" data-goto="' + id + '"' + (state.view === id ? ' aria-current="page"' : '') + '>' +
         icon(n[2], 14) + '<span class="label">' + esc(n[1]) + '</span><span class="count">' + esc(count) + '</span></button>';
@@ -366,6 +384,14 @@
 
   function renderTopbar() {
     $('view-title').textContent = TITLES[state.view];
+    if (state.view === 'organization') {
+      var org = state.organization || emptyOrganization(), overview = org.overview || {};
+      $('stat-findings').textContent = (overview.anomalies || 0) + ' anomalies';
+      $('stat-identities').textContent = ((overview.users || 0) + (overview.groups || 0) + (overview.roles || 0)) + ' identities';
+      $('stat-techniques').textContent = (overview.accounts_scanned || 0) + '/' + (overview.accounts_discovered || 0) + ' accounts';
+      $('source-eyebrow').textContent = 'Organization · ' + (org.source === 'aws-organization' ? 'AWS inventory' : 'current analysis');
+      return;
+    }
     $('stat-findings').textContent = state.data.findings.length + ' findings';
     $('stat-identities').textContent = state.data.identityCount + ' identities';
     $('stat-techniques').textContent = state.data.escalationPaths + ' paths';
@@ -504,6 +530,7 @@
       ? 'Connected ' + (aws.access_key_hint || '') + ' · ' + (aws.region || 'us-east-1')
       : 'Not connected';
     if (!$('aws-region').value || $('aws-region').value === 'us-east-1') $('aws-region').value = aws.region || 'us-east-1';
+    if (!$('aws-organization-role').value) $('aws-organization-role').value = aws.organization_role_name || '';
     $('ai-provider').value = ai.provider || 'anthropic';
     if (!$('ai-model').value) $('ai-model').value = ai.model || '';
     $('ai-base-url').value = ai.base_url || AI_URL_DEFAULTS[ai.provider || 'anthropic'];
@@ -967,6 +994,98 @@
       '</svg>';
   }
 
+  function renderOrganization() {
+    var org = state.organization || (state.data && state.data.organization) || emptyOrganization();
+    var overview = org.overview || {}, coverage = org.coverage || {}, warnings = coverage.warnings || [];
+    var generated = org.generated_at ? new Date(org.generated_at) : null;
+    $('org-generated').textContent = generated && !isNaN(generated.getTime())
+      ? 'Updated ' + generated.toLocaleString()
+      : 'No organization scan saved';
+    setButtonBusy('scan-organization', state.organizationStatus === 'loading', 'Scanning…', 'Scan organization');
+
+    var message = $('org-message');
+    var messageText = state.organizationStatus === 'loading'
+      ? 'Discovering accounts, collecting identity policies, and checking credential hygiene…'
+      : state.organizationError || warnings.join(' · ');
+    message.hidden = !messageText;
+    message.textContent = messageText || '';
+    message.style.borderColor = state.organizationError ? 'var(--n-crit)' : (coverage.complete ? 'var(--n-low)' : 'var(--n-med)');
+    message.style.color = state.organizationError ? 'var(--n-crit)' : 'var(--n-ink-2)';
+
+    var metrics = [
+      [overview.accounts_scanned || 0, 'Accounts scanned', ''],
+      [overview.users || 0, 'Users', ''],
+      [overview.groups || 0, 'Groups', ''],
+      [overview.roles || 0, 'Roles', ''],
+      [overview.policies || 0, 'Policies', ''],
+      [overview.anomalies || 0, 'Review items', (overview.critical || 0) ? 'critical' : '']
+    ];
+    $('org-metrics').innerHTML = metrics.map(function (item) {
+      return '<div class="org-metric ' + item[2] + '"><strong>' + esc(item[0]) + '</strong><span>' + esc(item[1]) + '</span></div>';
+    }).join('');
+
+    var severities = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+    $('org-severity-filters').innerHTML = severities.map(function (severity) {
+      var count = severity === 'ALL' ? (org.anomalies || []).length
+        : (org.anomalies || []).filter(function (item) { return item.severity === severity; }).length;
+      return '<button class="chip" type="button" data-org-sev="' + severity + '" aria-pressed="' + (state.orgSeverity === severity) + '">' +
+        esc(severity === 'ALL' ? 'All' : severity) + ' ' + count + '</button>';
+    }).join('');
+    var anomalies = (org.anomalies || []).filter(function (item) {
+      return state.orgSeverity === 'ALL' || item.severity === state.orgSeverity;
+    });
+    $('org-anomaly-meta').textContent = (overview.critical || 0) + ' critical · ' + (overview.high || 0) + ' high';
+    $('org-anomalies').innerHTML = anomalies.length ? anomalies.map(function (item) {
+      var color = SEV_VAR[item.severity] || 'var(--n-mute)';
+      return '<div class="org-anomaly"><span class="org-anomaly-sev" style="color:' + color + '">' + esc(item.severity) + '</span>' +
+        '<div class="org-anomaly-copy"><strong>' + esc(item.title) + '</strong>' +
+        '<div class="meta">' + esc(item.entity_name) + ' · ' + esc(item.account_id) + ' · ' + esc(item.category) + '</div>' +
+        '<p>' + esc(item.evidence) + '</p><p class="recommend">Next: ' + esc(item.recommendation) + '</p></div></div>';
+    }).join('') : '<div class="org-empty">No review items match this filter.</div>';
+
+    var accounts = org.accounts || [];
+    $('org-account-meta').textContent = (overview.accounts_scanned || 0) + ' of ' + (overview.accounts_discovered || 0) + ' scanned';
+    $('org-accounts').innerHTML = accounts.length ? accounts.map(function (account) {
+      return '<div class="org-account"><i class="org-account-state ' + (account.scanned ? 'scanned' : '') + '"></i>' +
+        '<div class="org-account-copy"><strong>' + esc(account.name || account.account_id) + '</strong>' +
+        '<span>' + esc(account.account_id) + (account.email ? ' · ' + esc(account.email) : '') + '</span>' +
+        '<span>' + esc(account.scanned ? 'IAM inventory collected' : (account.error || 'Not scanned')) + '</span></div></div>';
+    }).join('') : '<div class="org-empty">No AWS accounts have been discovered yet.</div>';
+
+    var types = [['ALL', 'All'], ['user', 'Users'], ['group', 'Groups'], ['role', 'Roles']];
+    $('org-type-filters').innerHTML = types.map(function (item) {
+      return '<button class="chip" type="button" data-org-type="' + item[0] + '" aria-pressed="' + (state.orgType === item[0]) + '">' + item[1] + '</button>';
+    }).join('');
+    var query = state.orgQuery.trim().toLowerCase();
+    var identities = (org.identities || []).filter(function (identity) {
+      if (state.orgType !== 'ALL' && identity.type !== state.orgType) return false;
+      if (!query) return true;
+      var haystack = [identity.name, identity.account_id, identity.arn]
+        .concat(identity.groups || [], identity.members || [], identity.policies || [], identity.trust_principals || [], identity.flags || [])
+        .join(' ').toLowerCase();
+      return haystack.indexOf(query) !== -1;
+    });
+    $('org-identity-meta').textContent = identities.length + ' of ' + (org.identities || []).length + ' identities';
+    $('org-identities').innerHTML = identities.length ? identities.map(function (identity) {
+      var relationships = identity.type === 'user' ? identity.groups
+        : identity.type === 'group' ? identity.members : identity.trust_principals;
+      var relationshipLabel = identity.type === 'user' ? 'No groups'
+        : identity.type === 'group' ? 'No members' : 'No trust principals';
+      function tags(values, extraClass, emptyLabel) {
+        values = values || [];
+        if (!values.length) return '<span class="hint">' + esc(emptyLabel) + '</span>';
+        return '<div class="org-list">' + values.slice(0, 6).map(function (value) {
+          return '<span class="' + (extraClass || '') + '">' + esc(value) + '</span>';
+        }).join('') + (values.length > 6 ? '<span>+' + (values.length - 6) + '</span>' : '') + '</div>';
+      }
+      return '<tr><td><div class="org-identity-name"><strong>' + esc(identity.name) + '</strong><span>' + esc(identity.arn) + '</span></div></td>' +
+        '<td><span class="tag">' + esc(identity.type) + '</span></td><td class="mono">' + esc(identity.account_id) + '</td>' +
+        '<td>' + tags(relationships, '', relationshipLabel) + '</td>' +
+        '<td>' + tags(identity.policies, '', 'No attached policies') + '</td>' +
+        '<td>' + tags(identity.flags, 'signal', 'No anomaly signals') + '</td></tr>';
+    }).join('') : '<tr><td colspan="6"><div class="org-empty">No identities match this filter.</div></td></tr>';
+  }
+
   function renderCharts() {
     var dark = state.theme === 'dark';
     var c = dark ? { CRITICAL: '#d2686f', HIGH: '#cc8b4e', MEDIUM: '#bca85a', LOW: '#7fa189' } : { CRITICAL: '#a8434b', HIGH: '#91602c', MEDIUM: '#7d6c22', LOW: '#4a6b55' };
@@ -1087,6 +1206,7 @@
     if (view === 'findings') renderFindings();
     if (view === 'remediation') renderRemediation();
     if (view === 'visualizer') renderVisualizer();
+    if (view === 'organization') renderOrganization();
     if (view === 'charts') renderCharts();
     if (view === 'settings') renderSettings();
     try { history.replaceState(null, '', '#' + view); } catch (e) {}
@@ -1097,7 +1217,7 @@
     if (!state.selId && state.data.findings.length) state.selId = state.data.findings[0].id;
     renderNav(); renderTopbar();
     renderOverview(); renderInspector(); renderFindings();
-    renderRemediation(); renderVisualizer(); renderCharts();
+    renderRemediation(); renderVisualizer(); renderOrganization(); renderCharts();
     renderGraphDetail(); renderSettings(); renderRiskBrief();
   }
 
@@ -1129,6 +1249,7 @@
   function applyResult(payload, requestId) {
     if (requestId && requestId !== state.requestSerial) return;
     state.data = normalise(payload);
+    if (!state.organizationLocked) state.organization = state.data.organization;
     state.selId = null;
     state.selectedPath = null;
     state.selectedEvidence = 0;
@@ -1146,6 +1267,7 @@
 
   function fallbackOffline(msg) {
     state.data = normalise(null);
+    if (!state.organizationLocked) state.organization = state.data.organization;
     state.selId = null;
     state.analysisStatus = 'partial';
     state.analysisError = '';
@@ -1166,6 +1288,7 @@
         coverage: { complete: false, warnings: [message] }, ai_status: 'disabled'
       }
     });
+    if (!state.organizationLocked) state.organization = state.data.organization;
     state.selId = null;
     state.analysisStatus = 'error';
     state.analysisError = message;
@@ -1219,6 +1342,35 @@
     }).catch(function () { setSettingsMessage('Settings are unavailable while the backend is offline.', true); });
   }
 
+  function loadOrganization() {
+    fetch('/api/organization').then(function (r) { return r.json(); }).then(function (payload) {
+      if (!payload.available || !payload.inventory) return;
+      state.organization = payload.inventory;
+      state.organizationLocked = true;
+      renderOrganization(); renderNav(); renderTopbar();
+    }).catch(function () { /* The current analysis inventory remains available. */ });
+  }
+
+  function scanOrganization() {
+    state.organizationStatus = 'loading';
+    state.organizationError = '';
+    $('status-text').textContent = 'Scanning AWS organization…';
+    renderOrganization();
+    requestJSON('/api/organization/scan', 'POST').then(function (payload) {
+      state.organization = payload;
+      state.organizationLocked = true;
+      state.organizationStatus = 'complete';
+      $('status-text').textContent = (payload.overview.accounts_scanned || 0) + ' accounts · ' +
+        (payload.overview.anomalies || 0) + ' organization review items';
+      renderOrganization(); renderNav(); renderTopbar();
+    }).catch(function (error) {
+      state.organizationStatus = 'error';
+      state.organizationError = error.message || 'Organization scan failed.';
+      $('status-text').textContent = 'Organization scan failed';
+      renderOrganization();
+    });
+  }
+
   function setButtonBusy(id, busy, busyText, defaultText) {
     var button = $(id);
     if (!button) return;
@@ -1233,7 +1385,8 @@
       access_key_id: $('aws-access-key').value,
       secret_access_key: $('aws-secret-key').value,
       session_token: $('aws-session-token').value,
-      region: $('aws-region').value
+      region: $('aws-region').value,
+      organization_role_name: $('aws-organization-role').value
     }).then(function (payload) {
       state.settings = payload.settings;
       $('aws-secret-key').value = ''; $('aws-session-token').value = '';
@@ -1254,7 +1407,7 @@
   function removeAWSSettings() {
     requestJSON('/api/settings/aws', 'DELETE').then(function (payload) {
       state.settings = payload.settings;
-      $('aws-access-key').value = ''; $('aws-secret-key').value = ''; $('aws-session-token').value = '';
+      $('aws-access-key').value = ''; $('aws-secret-key').value = ''; $('aws-session-token').value = ''; $('aws-organization-role').value = '';
       renderSettings(); setSettingsMessage('Saved AWS credentials were removed from backend/.env.', false);
     }).catch(function (error) { setSettingsMessage(error.message || 'Could not remove AWS credentials.', true); });
   }
@@ -1358,6 +1511,12 @@
     var gdSevBtn = e.target.closest('[data-gd-sev]');
     if (gdSevBtn) { state.gdSev = gdSevBtn.getAttribute('data-gd-sev'); renderGraphDetail(); return; }
 
+    var orgSevBtn = e.target.closest('[data-org-sev]');
+    if (orgSevBtn) { state.orgSeverity = orgSevBtn.getAttribute('data-org-sev'); renderOrganization(); return; }
+
+    var orgTypeBtn = e.target.closest('[data-org-type]');
+    if (orgTypeBtn) { state.orgType = orgTypeBtn.getAttribute('data-org-type'); renderOrganization(); return; }
+
     var selEl = e.target.closest('[data-select]');
     if (selEl) {
       state.selId = selEl.getAttribute('data-select');
@@ -1374,6 +1533,7 @@
     if (e.target.closest('#theme-toggle')) { state.theme = state.theme === 'dark' ? 'light' : 'dark'; applyTheme(); return; }
     if (e.target.closest('#reanalyze') || e.target.closest('[data-load-demo]')) { analyze(); return; }
     if (e.target.closest('#scan-aws') || e.target.closest('[data-scan-aws]')) { scanAccount(); return; }
+    if (e.target.closest('#scan-organization')) { scanOrganization(); return; }
     if (e.target.closest('#analyze-upload')) { analyzeUpload(); return; }
     if (e.target.closest('#remove-aws-settings')) { removeAWSSettings(); return; }
     if (e.target.closest('#remove-ai-settings')) { removeAISettings(); return; }
@@ -1400,6 +1560,7 @@
 
   $('finding-search').addEventListener('input', function (e) { state.query = e.target.value; renderFindings(); });
   $('gd-search').addEventListener('input', function (e) { state.gdQuery = e.target.value; renderGraphDetail(); });
+  $('org-search').addEventListener('input', function (e) { state.orgQuery = e.target.value; renderOrganization(); });
   $('palette-input').addEventListener('input', function () { state.paletteIndex = 0; renderPalette(); });
   $('config-file').addEventListener('change', function (event) {
     var file = event.target.files && event.target.files[0];
@@ -1440,5 +1601,6 @@
   goTo(initialView in TITLES ? initialView : 'overview');
   window.scrollTo(0, 0);
   loadSettings();
+  loadOrganization();
   analyze();
 })();

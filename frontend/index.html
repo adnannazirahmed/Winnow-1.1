@@ -273,6 +273,56 @@
         </div>
       </section>
 
+      <!-- ORGANIZATION INTELLIGENCE -->
+      <section class="view" data-view="organization">
+        <div class="panel org-hero">
+          <div>
+            <span class="eyebrow">Identity and change inventory</span>
+            <h2>Organization intelligence</h2>
+            <p>Map users, groups, roles, policies, credentials, and cross-account trust. Winnow saves local snapshots so later scans can identify new and unmanaged access.</p>
+          </div>
+          <div class="org-hero-actions">
+            <span class="panel-meta" id="org-generated">No organization scan saved</span>
+            <button class="btn btn-primary" type="button" id="scan-organization">Scan organization</button>
+          </div>
+        </div>
+        <div class="source-message org-message" id="org-message" role="status" hidden></div>
+        <div class="org-metrics" id="org-metrics"></div>
+
+        <div class="org-grid">
+          <div class="panel org-anomalies-panel">
+            <div class="panel-head">
+              <div><span class="panel-title">Anomaly review</span><div class="panel-meta" id="org-anomaly-meta">Evidence-backed checks</div></div>
+              <div class="org-filter-row" id="org-severity-filters"></div>
+            </div>
+            <div class="org-anomalies" id="org-anomalies"></div>
+          </div>
+          <div class="panel org-accounts-panel">
+            <div class="panel-head"><span class="panel-title">AWS accounts</span><span class="panel-meta" id="org-account-meta">Coverage</span></div>
+            <div class="org-accounts" id="org-accounts"></div>
+          </div>
+        </div>
+
+        <div class="panel org-inventory-panel">
+          <div class="panel-head org-inventory-head">
+            <div><span class="panel-title">Identity inventory</span><div class="panel-meta" id="org-identity-meta">Users, groups, roles, and their effective attachments</div></div>
+            <div class="org-inventory-tools">
+              <div class="search-field">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+                <input type="text" id="org-search" aria-label="Filter identity inventory" placeholder="Filter identity, account, group, or policy">
+              </div>
+              <div class="org-filter-row" id="org-type-filters"></div>
+            </div>
+          </div>
+          <div class="org-table-wrap">
+            <table>
+              <thead><tr><th>Identity</th><th>Type</th><th>Account</th><th>Membership / trust</th><th>Policies</th><th>Signals</th></tr></thead>
+              <tbody id="org-identities"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- CHARTS -->
       <section class="view" data-view="charts">
         <div class="grid-charts">
@@ -311,6 +361,9 @@
               <input class="settings-input" id="aws-session-token" type="password" autocomplete="new-password" spellcheck="false" placeholder="For temporary credentials">
               <label class="field-label" for="aws-region">Region</label>
               <input class="settings-input" id="aws-region" type="text" value="us-east-1" autocomplete="off" spellcheck="false">
+              <label class="field-label" for="aws-organization-role">Cross-account audit role <span>optional</span></label>
+              <input class="settings-input" id="aws-organization-role" type="text" autocomplete="off" spellcheck="false" placeholder="WinnowAuditRole">
+              <p class="field-help">Deploy the same read-only role in member accounts to let Organization Intelligence scan them. Account discovery still works without it.</p>
               <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-aws-settings">Save and scan</button><button class="btn btn-danger" type="button" id="remove-aws-settings">Remove account</button></div>
             </div>
           </form>

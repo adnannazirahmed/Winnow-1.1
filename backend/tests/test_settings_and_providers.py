@@ -43,6 +43,7 @@ class TestSettings(unittest.TestCase):
             'secret_access_key': 'a' * 40,
             'session_token': 'token-value',
             'region': 'us-east-1',
+            'organization_role_name': 'WinnowAuditRole',
         })
         contents = settings.ENV_FILE.read_text(encoding='utf-8')
         self.assertIn('AWS_ACCESS_KEY_ID', contents)
@@ -50,6 +51,7 @@ class TestSettings(unittest.TestCase):
         public = settings.public_settings()['aws']
         self.assertTrue(public['configured'])
         self.assertEqual(public['access_key_hint'], '…CDEF')
+        self.assertEqual(public['organization_role_name'], 'WinnowAuditRole')
         self.assertNotIn('a' * 40, str(public))
         settings.remove_aws_credentials()
         self.assertFalse(settings.public_settings()['aws']['configured'])
