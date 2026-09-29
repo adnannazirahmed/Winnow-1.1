@@ -218,6 +218,7 @@
         severity: String(f.severity || 'MEDIUM').toUpperCase(),
         resource: f.resource_name || 'unknown',
         resource_type: f.resource_type || '',
+        account_id: f.account_id || '',
         mitre: f.mitre_techniques || [],
         /* attack_path arrives as an array of steps. */
         attack_path: Array.isArray(path) ? path.join(' → ') : (path || ''),
@@ -790,8 +791,10 @@
     }
     var real = state.data.remediations[f.id];
     var loadState = state.remediationLoads[f.id];
+    var needsDeployablePolicy = !real || real.source !== 'ai' ||
+      !(real.validation && real.validation.export_ready);
 
-    if ((!real || real.source !== 'ai') && !loadState && !STATIC_PREVIEW) {
+    if (needsDeployablePolicy && !loadState && !STATIC_PREVIEW) {
       requestFindingRemediation(f);
       return;
     }
@@ -882,7 +885,11 @@
         '<div class="explain">' + esc(a.explanation) + '</div></div></div>';
     }).join('') || '<div class="panel"><div class="panel-body" style="color:var(--n-mute)">No remediation actions returned for this finding.</div></div>';
 
-    state.currentPolicy = { original: original, proposed: hardened, validation: validation, requiredInputs: requiredInputs };
+    state.currentPolicy = {
+      original: original, proposed: hardened, validation: validation,
+      requiredInputs: requiredInputs, deploymentMode: real.deployment_mode || 'replacement',
+      policyGeneration: real.policy_generation || 'ai'
+    };
     renderPolicyWorkbench();
     $('compliance').innerHTML = compliance.map(function (c) { return '<div><span>↳</span><span>' + esc(c) + '</span></div>'; }).join('') || '<div>No compliance mappings returned.</div>';
     $('queue-mini').innerHTML = queueHtml(5) || '<div class="empty-panel">Queue is empty.</div>';
@@ -903,6 +910,7 @@
         severity: finding.severity,
         resource_type: finding.resource_type,
         resource_name: finding.resource,
+        account_id: finding.account_id || state.data.accountId || '',
         policy_document: finding.policy_document || {},
         attack_path: finding.attack_path_steps || [],
         mitre_techniques: finding.mitre || [],
@@ -955,10 +963,22 @@
     state.currentPolicy.visibleText = text;
     var validation = current.validation || {};
     var ready = validation.export_ready;
+    var copyButton = $('copy-policy');
+    if (view === 'proposed') {
+      copyButton.disabled = !ready;
+      copyButton.textContent = ready ? 'Copy deployable policy' : 'Policy not deployable';
+    } else if (view === 'original') {
+      copyButton.disabled = false;
+      copyButton.textContent = 'Copy original policy';
+    } else {
+      copyButton.disabled = true;
+      copyButton.textContent = 'Select a policy to copy';
+    }
     $('policy-caption').textContent = view === 'original' ? 'Exact source statement retained by the finding'
       : view === 'diff' ? 'Lines prefixed − are removed; lines prefixed + are proposed'
-      : ready ? 'Structurally checked proposal; workflow access still needs review'
-      : 'Proposal template; resolve required inputs before export';
+      : ready && current.deploymentMode === 'supplemental_deny' ? 'Deployable supplemental deny guardrail; test before attaching'
+      : ready ? 'Complete deployable replacement; test workload access before applying'
+      : 'No deployable proposal is available';
     var checks = [
       ['Policy structure', validation.policy_structure || 'unknown', validation.policy_structure === 'passed'],
       ['Original conditions preserved', validation.conditions_preserved ? 'passed' : 'review', !!validation.conditions_preserved],
@@ -972,7 +992,7 @@
     }).join('') + (current.requiredInputs || []).map(function (input) {
       return '<div class="validation-row"><span>Required input</span><span class="tag check-review">' + esc(input) + '</span></div>';
     }).join('') + '<div class="validation-note">' + esc(validation.note || 'No AWS change has been applied.') + '</div>';
-    $('validation-status').textContent = ready ? 'Structurally checked' : current.proposed && Object.keys(current.proposed).length ? 'Review required' : 'No proposal';
+    $('validation-status').textContent = ready ? 'Deployable policy' : current.proposed && Object.keys(current.proposed).length ? 'Review required' : 'No proposal';
     $('validation-status').className = 'tag ' + (ready ? 'check-pass' : 'check-review');
     $('validate-proposal').textContent = state.validationReviewed ? 'Checks reviewed' : 'Review checks';
   }
@@ -1789,7 +1809,7 @@
       if (!copyText) return;
       navigator.clipboard.writeText(copyText).then(function () {
         copyButton.textContent = 'Copied';
-        setTimeout(function () { copyButton.textContent = 'Copy visible policy'; }, 1400);
+        setTimeout(renderPolicyWorkbench, 1400);
       }).catch(function () { copyButton.textContent = 'Copy failed'; });
       return;
     }

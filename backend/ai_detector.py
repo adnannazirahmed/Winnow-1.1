@@ -94,7 +94,7 @@ Return an empty array [] if there are no additional findings."""
         return self.client is not None or (self.provider_client is not None and self.provider_client.enabled)
 
     def detect(self, iam_config: Any, static_findings: List[Dict]) -> List[Dict]:
-        if not self.client:
+        if not self.enabled:
             return []
 
         try:

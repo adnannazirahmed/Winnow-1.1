@@ -142,7 +142,7 @@ class TestReviewableRemediation(unittest.TestCase):
             "summary": "Scope the role.", "actions": [{"action": "Scope role"}],
             "hardened_policy": {"Version": "2012-10-17", "Statement": [{
                 "Effect": "Allow", "Action": "sts:AssumeRole",
-                "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>",
+                "Resource": "arn:aws:iam::123456789012:role/ApprovedPipelineRole",
                 "Condition": copy.deepcopy(statement["Condition"]),
             }]},
             "compliance_notes": [],
@@ -151,7 +151,8 @@ class TestReviewableRemediation(unittest.TestCase):
         proposed = result["hardened_policy"]["Statement"][0]
         self.assertEqual(proposed["Condition"], original["Condition"])
         self.assertTrue(result["validation"]["conditions_preserved"])
-        self.assertIn("AWS account ID", result["required_inputs"])
+        self.assertEqual(result["required_inputs"], [])
+        self.assertTrue(result["validation"]["export_ready"])
 
     def test_unavailable_results_are_bound_to_each_identity(self):
         base = {

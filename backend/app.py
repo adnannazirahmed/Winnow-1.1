@@ -152,6 +152,7 @@ def _run_pipeline(iam_data, source='static', source_name=None):
     ))
     for i, vuln in enumerate(vulnerabilities, start=1):
         vuln['id'] = f"VULN-{i:04d}"
+        vuln['account_id'] = iam_data.account_id
 
     remediations = remediator.batch_remediate(vulnerabilities)
     remediation_results = [
@@ -383,6 +384,7 @@ def generate_remediation():
             'severity': severity,
             'resource_type': str(finding.get('resource_type') or 'unknown')[:160],
             'resource_name': str(finding.get('resource_name') or 'unknown')[:512],
+            'account_id': str(finding.get('account_id') or '')[:64],
             'policy_document': policy_document,
             'attack_path': [str(step)[:512] for step in attack_path[:24]],
             'mitre_techniques': [str(item)[:64] for item in mitre[:24]],

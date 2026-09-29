@@ -45,7 +45,7 @@ GOOD_REMEDIATION = '''Sure, here is the analysis:
 {"summary": "Risky", "risk_score": 88, "actions": [{"action": "Fix it", "description": "d",
  "priority": "CRITICAL", "code_example": "{}", "explanation": "e"}],
  "hardened_policy": {"Version": "2012-10-17", "Statement": [
-   {"Effect": "Allow", "Action": "iam:AttachUserPolicy", "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>"}
+   {"Effect": "Allow", "Action": "iam:AttachUserPolicy", "Resource": "arn:aws:iam::123456789012:user/ApprovedAutomationUser"}
  ]}, "compliance_notes": ["CIS 1.16"]}
 ```'''
 
@@ -121,7 +121,7 @@ class TestRemediatorAIPath(unittest.TestCase):
             "Statement": {
               "Effect": "Allow",
               "Action": "iam:AttachUserPolicy",
-              "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>"
+              "Resource": "arn:aws:iam::123456789012:user/ApprovedAutomationUser"
             }
           }
         }'''
@@ -131,6 +131,24 @@ class TestRemediatorAIPath(unittest.TestCase):
         self.assertEqual(len(result['hardened_policy']['Statement']), 1)
         self.assertEqual(result['risks'][0], 'Arbitrary managed policies can be attached.')
         self.assertEqual(len(result['actions']), 1)
+
+    def test_placeholder_policy_is_replaced_with_deployable_guardrail(self):
+        template = '''{
+          "summary": "Assessment", "risk_score": 91,
+          "actions": [{"action": "Scope access"}],
+          "hardened_policy": {"Version": "2012-10-17", "Statement": [{
+            "Effect": "Allow", "Action": "iam:AttachUserPolicy",
+            "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>"
+          }]}
+        }'''
+        rem = self._remediator([template, template])
+        result = rem.get_remediation(self.vulns[0])
+        rendered = str(result['hardened_policy'])
+        self.assertEqual(result['source'], 'ai')
+        self.assertEqual(result['policy_generation'], 'guardrail_fallback')
+        self.assertNotIn('<ACCOUNT_ID>', rendered)
+        self.assertNotIn('<TARGET_USER_NAME>', rendered)
+        self.assertTrue(result['validation']['export_ready'])
 
     def test_invalid_first_policy_is_repaired_once(self):
         invalid = '''{
@@ -221,6 +239,17 @@ class TestAIDetector(unittest.TestCase):
     def test_malformed_response_yields_no_findings(self):
         det = self._detector(['not json at all'])
         self.assertEqual(det.detect({'x': 1}, []), [])
+
+    def test_compatible_provider_runs_detection_pass(self):
+        provider = mock.Mock()
+        provider.enabled = True
+        provider.complete.return_value = '[]'
+        with mock.patch.dict(os.environ, {
+            'AI_PROVIDER': 'deepseek', 'DEEPSEEK_API_KEY': 'test-key'
+        }, clear=True), mock.patch('ai_detector.AIProvider', return_value=provider):
+            detector = AIDetector()
+            self.assertEqual(detector.detect({'x': 1}, []), [])
+        provider.complete.assert_called_once()
 
     def test_dedupe_drops_overlap_with_static(self):
         det = self._detector(['[]'])
