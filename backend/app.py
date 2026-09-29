@@ -13,6 +13,7 @@ import iam_graph
 from graph_to_findings import graph_to_findings
 from risk_brief import RiskBriefGenerator
 from ai_provider import AIConnectionError, AIProvider
+from analysis_history import AnalysisHistoryStore
 from organization_intelligence import (
     InventorySnapshotStore,
     build_organization_intelligence,
@@ -45,6 +46,7 @@ remediator = Remediator()
 visualizer = Visualizer()
 risk_brief_generator = RiskBriefGenerator()
 inventory_store = InventorySnapshotStore()
+analysis_store = AnalysisHistoryStore()
 
 _SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
 
@@ -69,6 +71,17 @@ def _settings_write_guard():
     if not _settings_write_allowed():
         return jsonify({'error': 'Settings changes are available only from the server machine.'}), 403
     return None
+
+
+def _remember_analysis(payload):
+    """Persist a completed result without making history a scan dependency."""
+    if app.config.get('TESTING'):
+        return payload
+    try:
+        payload['history'] = analysis_store.save(payload)
+    except Exception:
+        logger.exception('Could not save completed analysis history')
+    return payload
 
 
 @app.after_request
@@ -235,7 +248,8 @@ def analyze():
         source_name = str(data.get('source_name') or '')[:160] or None
 
         iam_data = iam_ingest.config_to_iamdata(iam_config, config_type)
-        return jsonify(_run_pipeline(iam_data, source=source, source_name=source_name))
+        result = _run_pipeline(iam_data, source=source, source_name=source_name)
+        return jsonify(_remember_analysis(result))
     except ValueError as e:
         logger.warning(f"Invalid analyze request: {e}")
         return jsonify({'error': str(e)[:240] or 'Invalid IAM configuration format'}), 400
@@ -271,7 +285,7 @@ def scan_account():
 
     try:
         iam_data = iam_ingest.parse_gaad(raw, account_id)
-        return jsonify(_run_pipeline(iam_data, source='live'))
+        return jsonify(_remember_analysis(_run_pipeline(iam_data, source='live')))
     except Exception:
         logger.exception("Analysis error after AWS scan")
         return jsonify({'error': 'Internal server error during analysis'}), 500
@@ -285,6 +299,118 @@ def generate_dummy():
     except Exception:
         logger.exception("Dummy generation error")
         return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/history', methods=['GET', 'DELETE'])
+def analysis_history():
+    """List recent local analyses or remove the complete local history."""
+    try:
+        if request.method == 'DELETE':
+            guard = _settings_write_guard()
+            if guard:
+                return guard
+            return jsonify({'deleted': analysis_store.clear(), 'runs': []})
+        return jsonify({'runs': analysis_store.list()})
+    except Exception:
+        logger.exception('Could not access analysis history')
+        return jsonify({'error': 'Saved analysis history is unavailable.'}), 500
+
+
+@app.route('/api/history/latest', methods=['GET'])
+def latest_analysis():
+    try:
+        analysis = analysis_store.latest()
+        return jsonify({'available': bool(analysis), 'analysis': analysis})
+    except Exception:
+        logger.exception('Could not restore the latest analysis')
+        return jsonify({'error': 'The latest saved analysis is unavailable.'}), 500
+
+
+@app.route('/api/history/<int:run_id>', methods=['GET', 'DELETE'])
+def saved_analysis(run_id):
+    try:
+        if request.method == 'DELETE':
+            guard = _settings_write_guard()
+            if guard:
+                return guard
+            deleted = analysis_store.delete(run_id)
+            if not deleted:
+                return jsonify({'error': 'Saved analysis was not found.'}), 404
+            return jsonify({'deleted': True, 'id': run_id})
+        analysis = analysis_store.get(run_id)
+        if not analysis:
+            return jsonify({'error': 'Saved analysis was not found.'}), 404
+        return jsonify({'analysis': analysis})
+    except Exception:
+        logger.exception('Could not access saved analysis %s', run_id)
+        return jsonify({'error': 'Saved analysis is unavailable.'}), 500
+
+
+@app.route('/api/remediate', methods=['POST'])
+def generate_remediation():
+    """Generate and cache an AI assessment for one selected finding.
+
+    Batch analysis is intentionally capped to control latency and cost. This
+    route lets the policy workbench request any remaining finding on demand.
+    """
+    guard = _settings_write_guard()
+    if guard:
+        return guard
+    data = request.get_json(silent=True)
+    finding = data.get('finding') if isinstance(data, dict) else None
+    if not isinstance(finding, dict):
+        return jsonify({'error': 'Send one finding as JSON.'}), 400
+    try:
+        if len(str(finding)) > 32000:
+            raise ValueError('Finding is too large to remediate')
+        policy_document = finding.get('policy_document') or {}
+        if not isinstance(policy_document, dict):
+            raise ValueError('Finding policy_document must be an object')
+        attack_path = finding.get('attack_path') or []
+        if not isinstance(attack_path, list):
+            raise ValueError('Finding attack_path must be a list')
+        mitre = finding.get('mitre_techniques') or []
+        if not isinstance(mitre, list):
+            raise ValueError('Finding mitre_techniques must be a list')
+        severity = str(finding.get('severity') or 'MEDIUM').upper()
+        if severity not in _SEVERITY_RANK:
+            severity = 'MEDIUM'
+        clean_finding = {
+            'id': str(finding.get('id') or '')[:64],
+            'pattern_id': str(finding.get('pattern_id') or '')[:160],
+            'title': str(finding.get('title') or 'Unnamed finding')[:240],
+            'description': str(finding.get('description') or '')[:4000],
+            'severity': severity,
+            'resource_type': str(finding.get('resource_type') or 'unknown')[:160],
+            'resource_name': str(finding.get('resource_name') or 'unknown')[:512],
+            'policy_document': policy_document,
+            'attack_path': [str(step)[:512] for step in attack_path[:24]],
+            'mitre_techniques': [str(item)[:64] for item in mitre[:24]],
+            'remediation_hint': str(finding.get('remediation_hint') or '')[:1000],
+            'detection_source': str(finding.get('detection_source') or 'rule')[:32],
+        }
+        if not clean_finding['id']:
+            raise ValueError('Finding id is required')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    remediation = remediator.get_remediation(clean_finding)
+    history_saved = False
+    history_id = data.get('history_id') if isinstance(data, dict) else None
+    if history_id is not None:
+        try:
+            history_saved = analysis_store.update_remediation(
+                int(history_id), clean_finding['id'], remediation
+            )
+        except (TypeError, ValueError):
+            history_saved = False
+        except Exception:
+            logger.exception('Could not update remediation in saved analysis')
+    return jsonify({
+        'remediation': remediation,
+        'generated': remediation.get('source') == 'ai',
+        'history_saved': history_saved,
+    })
 
 
 @app.route('/api/organization', methods=['GET'])
@@ -399,7 +525,7 @@ def aws_settings():
         iam_data = iam_ingest.parse_gaad(raw, account_id)
         return jsonify({
             'settings': settings.public_settings(),
-            'analysis': _run_pipeline(iam_data, source='live'),
+            'analysis': _remember_analysis(_run_pipeline(iam_data, source='live')),
         })
     except Exception as e:
         logger.info('Saved AWS settings could not be verified: %s', type(e).__name__)

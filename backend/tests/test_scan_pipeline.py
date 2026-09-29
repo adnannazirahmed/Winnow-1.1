@@ -46,7 +46,7 @@ class TestRunPipeline(unittest.TestCase):
         self.assertGreater(r['summary']['total_vulnerabilities'], 5)
         self.assertIn('risk_brief', r)
         self.assertEqual(r['risk_brief']['metrics']['total_findings'], r['summary']['total_vulnerabilities'])
-        self.assertIn(r['risk_brief']['generated_by'], ('ai', 'rules'))
+        self.assertIn(r['risk_brief']['generated_by'], ('ai', 'unavailable'))
         self.assertIn('organization_intelligence', r)
         self.assertGreater(r['organization_intelligence']['overview']['roles'], 0)
         self.assertGreater(len(r['organization_intelligence']['identities']), 0)

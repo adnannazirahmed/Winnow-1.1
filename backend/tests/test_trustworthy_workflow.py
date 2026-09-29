@@ -137,14 +137,23 @@ class TestReviewableRemediation(unittest.TestCase):
             "severity": "HIGH", "resource_name": "Alice", "attack_path": ["Alice"],
             "policy_document": {"action": "sts:AssumeRole", "statement": statement},
         }
-        result = self.remediator.get_remediation(vulnerability)
+        result = self.remediator._decorate_result({
+            "vulnerability_id": "V-1", "source": "ai", "risk_score": 75,
+            "summary": "Scope the role.", "actions": [{"action": "Scope role"}],
+            "hardened_policy": {"Version": "2012-10-17", "Statement": [{
+                "Effect": "Allow", "Action": "sts:AssumeRole",
+                "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>",
+                "Condition": copy.deepcopy(statement["Condition"]),
+            }]},
+            "compliance_notes": [],
+        }, vulnerability)
         self.assertEqual(statement, original)
         proposed = result["hardened_policy"]["Statement"][0]
         self.assertEqual(proposed["Condition"], original["Condition"])
         self.assertTrue(result["validation"]["conditions_preserved"])
         self.assertIn("AWS account ID", result["required_inputs"])
 
-    def test_cache_does_not_reuse_another_identity_summary(self):
+    def test_unavailable_results_are_bound_to_each_identity(self):
         base = {
             "pattern_id": "iam:PassRole", "title": "Pass role", "severity": "HIGH",
             "attack_path": ["identity"],
@@ -154,8 +163,12 @@ class TestReviewableRemediation(unittest.TestCase):
         }
         alice = self.remediator.get_remediation(dict(base, id="A", resource_name="Alice"))
         bob = self.remediator.get_remediation(dict(base, id="B", resource_name="Bob"))
-        self.assertIn("Alice", alice["summary"])
-        self.assertIn("Bob", bob["summary"])
+        self.assertEqual(alice["vulnerability_id"], "A")
+        self.assertEqual(bob["vulnerability_id"], "B")
+        self.assertEqual(alice["source"], "unavailable")
+        self.assertEqual(bob["source"], "unavailable")
+        self.assertEqual(alice["summary"], "")
+        self.assertEqual(bob["summary"], "")
 
 
 if __name__ == '__main__':

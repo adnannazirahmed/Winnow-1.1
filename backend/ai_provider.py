@@ -98,9 +98,24 @@ class AIProvider:
                 'model': self.model, 'max_tokens': max_tokens, 'temperature': 0.1,
                 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}],
             }
+            if self.name == 'deepseek':
+                # Winnow's AI tasks require a machine-readable JSON result.
+                # DeepSeek enables thinking by default; on policy prompts its
+                # hidden reasoning can consume the entire output budget and
+                # leave message.content empty. Non-thinking JSON mode returns
+                # the assessment and policy directly.
+                payload['thinking'] = {'type': 'disabled'}
+                payload['response_format'] = {'type': 'json_object'}
             headers = {'Authorization': 'Bearer ' + self.api_key}
 
-        response = httpx.post(url, json=payload, headers=headers, timeout=self.timeout)
+        # Provider calls should not inherit proxy variables from the process
+        # that launched Winnow. Development hosts (including sandboxed shells)
+        # can set loopback proxy placeholders that make otherwise reachable
+        # provider URLs fail with a misleading connection error.
+        response = httpx.request(
+            'POST', url, json=payload, headers=headers, timeout=self.timeout,
+            trust_env=False,
+        )
         response.raise_for_status()
         body = response.json()
         if self.name == 'ollama':

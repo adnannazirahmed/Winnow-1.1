@@ -2,8 +2,8 @@
    Vanilla ES5-compatible, no build step. Loaded after scenes.js.
 
    Data flow: on load we POST the demo IAM config to the Flask API and normalise
-   the response into the shape the views expect. If the API is not reachable
-   (static preview) we fall back to DEMO_RESULT so the UI is never empty.
+   the response into the shape the views expect. GitHub Pages can still show a
+   bundled findings-only preview, but it never fabricates an AI report.
 
    The mapping below is written against the REAL /api/analyze contract in
    backend/app.py, verified against a live response:
@@ -40,9 +40,9 @@
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
   var SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
-  /* ---------------- fallback dataset (offline preview only) ----------------
-     The live demo config comes from GET-less POST /api/generate-dummy; this
-     bundled result only renders when the backend is unreachable. */
+  /* ---------------- static findings preview (GitHub Pages only) -----------
+     This sample contains detector output only. AI reports and remediations are
+     deliberately absent when no backend/provider is connected. */
 
   function F(id, title, severity, resource, resourceType, mitre, path, description) {
     return { id: id, title: title, severity: severity, resource: resource, resource_type: resourceType, mitre: mitre, attack_path: path, description: description, detection_source: 'rule' };
@@ -88,18 +88,7 @@
       { name: 'VulnerableEC2Role', critical: 0, high: 0, medium: 1, low: 0, total: 1, score: 8 },
       { name: 'DevelopersGroup', critical: 0, high: 0, medium: 1, low: 0, total: 1, score: 8 }
     ],
-    queue: [
-      ['Remove iam:AttachUserPolicy/AttachRolePolicy', 'CRITICAL', 4],
-      ['Remove iam:PutUserPolicy/PutRolePolicy', 'CRITICAL', 4],
-      ['Restrict Role Assumption with Conditions', 'HIGH', 2],
-      ['Restrict iam:PassRole to Specific Roles', 'HIGH', 2],
-      ['Restrict CreateAccessKey to Self', 'HIGH', 2],
-      ['Restrict UpdateLoginProfile to Self', 'HIGH', 2],
-      ['Apply Permissions Boundary', 'HIGH', 2],
-      ['Use Permissions Boundary for Role Creation', 'HIGH', 2],
-      ['Restrict Service Role Passing', 'MEDIUM', 1],
-      ['Review Attached Managed Policy', 'MEDIUM', 1]
-    ],
+    queue: [],
     remediations: {},
     aiCount: 0
   };
@@ -118,59 +107,7 @@
     warnings: ['Backend unavailable; showing the bundled offline sample.']
   };
   DEMO_RESULT.aiStatus = 'disabled';
-  DEMO_RESULT.riskBrief = {
-    generated_by: 'rules', provider: '', risk_score: 100,
-    headline: 'Critical IAM escalation exposure',
-    assessment: 'Winnow found 21 findings across 5 identities. Twelve critical paths require immediate review.',
-    business_impact: 'A compromised principal could attach or create policies that grant administrator access.',
-    metrics: { total_findings: 21, critical: 12, high: 6, medium: 3, low: 0, escalation_paths: 12, identities: 5, policies: 3 },
-    top_priority: { finding_id: 'VULN-0001', title: 'User Can Attach Admin Policy', severity: 'CRITICAL', resource: AP, reason: 'This permission can directly grant AdministratorAccess.', next_action: 'Restrict policy attachment to approved policy ARNs.' },
-    key_risks: [], most_exposed_resources: [{ name: AP, risk_score: 100, total_findings: 13 }, { name: CU, risk_score: 58, total_findings: 3 }, { name: LP, risk_score: 55, total_findings: 3 }],
-    confidence: { level: 'high', explanation: 'Complete coverage for the bundled sample.', limitations: [] }
-  };
-
-  /* Offline-only remediation copy. When the API answers, the backend's own
-     Remediator output is used instead of this table. */
-  var STRATEGY_ACTIONS = {
-    attach_policy: [
-      { name: 'Remove iam:AttachUserPolicy/AttachRolePolicy', priority: 'CRITICAL',
-        description: 'Remove the ability to attach arbitrary managed policies. If attachment is needed, restrict to specific policy ARNs using condition keys.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:AttachUserPolicy', Resource: 'arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>', Condition: { ArnEquals: { 'iam:PolicyARN': 'arn:aws:iam::<ACCOUNT_ID>:policy/<APPROVED_POLICY_NAME>' } } } },
-        explanation: 'Wildcard attachment allows escalation to AdministratorAccess. Restrict to specific approved policies.' },
-      { name: 'Apply Permissions Boundary', priority: 'HIGH',
-        description: 'Set a permissions boundary on the identity to limit maximum permissions regardless of attached policies.',
-        code: { PermissionsBoundary: 'arn:aws:iam::<ACCOUNT_ID>:policy/<BOUNDARY_POLICY_NAME>' },
-        explanation: 'Permissions boundaries provide a guardrail that cannot be bypassed by attaching policies.' }
-    ],
-    pass_role: [
-      { name: 'Restrict iam:PassRole to Specific Roles', priority: 'HIGH',
-        description: 'Limit which roles can be passed to services like EC2 and Lambda.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:PassRole', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:PassRole', Resource: 'arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>', Condition: { StringEquals: { 'iam:PassedToService': '<APPROVED_SERVICE>' } } } },
-        explanation: 'Prevents passing privileged roles (e.g. AdminRole) to compute resources.' }
-    ],
-    access_key: [
-      { name: 'Restrict CreateAccessKey to Self', priority: 'HIGH',
-        description: 'Add a condition so access keys can only be created for the calling user.',
-        code: { Before: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: '*' }, After: { Effect: 'Allow', Action: 'iam:CreateAccessKey', Resource: 'arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}' } },
-        explanation: 'Prevents creating access keys for other users (credential theft).' }
-    ],
-    managed_policy_review: [
-      { name: 'Review Attached Managed Policy', priority: 'MEDIUM',
-        description: 'Audit the attached managed policy for excessive permissions and replace it with a scoped custom policy.',
-        code: { Review: 'aws iam get-policy-version --policy-arn <arn> --version-id <default>' },
-        explanation: 'Broad AWS-managed policies (e.g. PowerUserAccess) usually exceed what the identity needs.' }
-    ]
-  };
-
-  var RISK_BY_SEV = { CRITICAL: 95, HIGH: 75, MEDIUM: 50, LOW: 25 };
-
-  function strategyFor(f) {
-    if (f.title.indexOf('Attached Managed Policy') === 0) return 'managed_policy_review';
-    if (f.title.indexOf('Attach') === 0 || f.title.indexOf('User Can Attach') === 0) return 'attach_policy';
-    if (f.title === 'Pass Role to Services') return 'pass_role';
-    if (f.title === 'Create Access Keys for Other Users') return 'access_key';
-    return 'attach_policy';
-  }
+  DEMO_RESULT.riskBrief = null;
 
   /* ---------------- state ---------------- */
 
@@ -190,7 +127,7 @@
     paletteOpen: false,
     paletteIndex: 0,
     sourceTab: 'demo',
-    analysisStatus: 'loading',
+    analysisStatus: STATIC_PREVIEW ? 'partial' : 'idle',
     analysisError: '',
     scanTime: null,
     selectedPath: null,
@@ -201,6 +138,10 @@
     requestSerial: 0,
     uploadedFileName: '',
     settings: null,
+    historyItems: [],
+    historyStatus: 'idle',
+    historyError: '',
+    currentScanId: null,
     organization: null,
     organizationLocked: false,
     organizationStatus: 'idle',
@@ -208,6 +149,7 @@
     orgQuery: '',
     orgType: 'ALL',
     orgSeverity: 'ALL',
+    remediationLoads: {},
     briefCollapsed: localStorage.getItem('winnow-brief-collapsed') === '1'
   };
 
@@ -221,9 +163,10 @@
     ['visualizer', 'Path explorer', ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']],
     ['organization', 'Organization', ['M3 21h18', 'M5 21V8l7-5 7 5v13', 'M9 21v-6h6v6', 'M8 10h.01', 'M12 10h.01', 'M16 10h.01']],
     ['charts', 'Charts', ['M21.21 15.89A10 10 0 1 1 8 2.83', 'M22 12A10 10 0 0 0 12 2v10z']],
+    ['history', 'Scan history', ['M3 12a9 9 0 1 0 3-6.7', 'M3 3v6h6', 'M12 7v5l3 2']],
     ['settings', 'Settings', ['M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z', 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.42 2.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.6h-3.4v-.08A1.7 1.7 0 0 0 9.96 19a1.7 1.7 0 0 0-1.88.34l-.06.06-2.42-2.42.06-.06A1.7 1.7 0 0 0 6 15.04 1.7 1.7 0 0 0 4.44 14H4.36v-3.4h.08A1.7 1.7 0 0 0 6 9.56a1.7 1.7 0 0 0-.34-1.88L5.6 7.62 8.02 5.2l.06.06A1.7 1.7 0 0 0 9.96 5.6 1.7 1.7 0 0 0 11 4.04v-.08h3.4v.08A1.7 1.7 0 0 0 15.44 5.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.42 2.42-.06.06A1.7 1.7 0 0 0 19.4 9.56 1.7 1.7 0 0 0 20.96 10.6h.08V14h-.08A1.7 1.7 0 0 0 19.4 15z']]
   ];
-  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', organization: 'Organization intelligence', charts: 'Charts', settings: 'Settings' };
+  var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', organization: 'Organization intelligence', charts: 'Charts', history: 'Scan history', settings: 'Settings' };
 
   /* ---------------- helpers ---------------- */
 
@@ -270,6 +213,7 @@
       var path = f.attack_path;
       return {
         id: f.id,
+        pattern_id: f.pattern_id || '',
         title: f.title || 'Unnamed finding',
         severity: String(f.severity || 'MEDIUM').toUpperCase(),
         resource: f.resource_name || 'unknown',
@@ -277,7 +221,9 @@
         mitre: f.mitre_techniques || [],
         /* attack_path arrives as an array of steps. */
         attack_path: Array.isArray(path) ? path.join(' → ') : (path || ''),
+        attack_path_steps: Array.isArray(path) ? path.slice() : [],
         description: f.description || '',
+        remediation_hint: f.remediation_hint || '',
         detection_source: f.detection_source || 'rule',
         policy_document: f.policy_document || {},
         decision: f.decision || 'allowed',
@@ -381,6 +327,7 @@
         : id === 'remediation' ? state.data.queue.length
         : id === 'visualizer' ? state.data.escalationPaths
         : id === 'organization' ? ((state.organization && state.organization.overview && state.organization.overview.anomalies) || '')
+        : id === 'history' ? (state.historyItems.length || '')
         : id === 'graph' ? '3D' : '';
       return '<button class="nav-item" data-goto="' + id + '"' + (state.view === id ? ' aria-current="page"' : '') + '>' +
         icon(n[2], 14) + '<span class="label">' + esc(n[1]) + '</span><span class="count">' + esc(count) + '</span></button>';
@@ -389,6 +336,13 @@
 
   function renderTopbar() {
     $('view-title').textContent = TITLES[state.view];
+    if (state.view === 'history') {
+      $('stat-findings').textContent = state.historyItems.length + ' scans';
+      $('stat-identities').textContent = 'local history';
+      $('stat-techniques').textContent = state.currentScanId ? 'scan #' + state.currentScanId : 'no scan open';
+      $('source-eyebrow').textContent = 'Analysis · saved runs';
+      return;
+    }
     if (state.view === 'organization') {
       var org = state.organization || emptyOrganization(), overview = org.overview || {};
       $('stat-findings').textContent = (overview.anomalies || 0) + ' anomalies';
@@ -410,7 +364,8 @@
     var d = state.data, coverage = d.coverage || {}, warnings = coverage.warnings || [];
     var source = d.source === 'live' ? ('AWS ' + (d.accountId || 'account'))
       : (d.sourceName || (d.source === 'demo' ? 'Bundled demo' : d.source === 'offline-demo' ? 'Bundled offline sample' : 'Uploaded JSON'));
-    var status = state.analysisStatus === 'loading' ? 'Analyzing'
+    var status = state.analysisStatus === 'idle' ? 'Ready to scan'
+      : state.analysisStatus === 'loading' ? 'Analyzing'
       : state.analysisStatus === 'error' ? 'Failed'
       : !coverage.complete ? 'Partial coverage'
       : d.findings.length ? 'Analysis complete' : 'No findings detected';
@@ -439,8 +394,11 @@
       return;
     }
     var brief = state.data.riskBrief;
-    if (!brief) {
-      host.innerHTML = '<div class="brief-loading"><strong>Risk brief unavailable</strong><span>Run an analysis to generate the summary.</span></div>';
+    if (!brief || brief.generated_by !== 'ai') {
+      var briefError = brief && brief.error
+        ? brief.error
+        : 'AI did not return a valid report. No fallback report was generated.';
+      host.innerHTML = '<div class="brief-loading"><strong>AI risk brief unavailable</strong><span>' + esc(briefError) + '</span></div>';
       return;
     }
 
@@ -449,13 +407,11 @@
     var resources = brief.most_exposed_resources || [];
     var confidence = brief.confidence || {};
     var score = Math.max(0, Math.min(100, Number(brief.risk_score) || 0));
-    var generator = brief.generated_by === 'ai'
-      ? ((brief.provider === 'anthropic' ? 'Claude' : brief.provider || 'AI') + ' · evidence grounded')
-      : 'Rule summary · AI unavailable';
+    var generator = (brief.provider === 'anthropic' ? 'Claude' : brief.provider || 'AI') + ' · evidence grounded';
     var severityClass = score >= 80 ? 'critical' : score >= 55 ? 'high' : score > 0 ? 'medium' : 'low';
 
     host.innerHTML =
-      '<div class="brief-head"><div><div class="brief-kicker">Current analysis</div><div class="brief-generator">' + esc(generator) + '</div></div><span class="tag">' + esc(brief.generated_by === 'ai' ? 'AI brief' : 'Fallback') + '</span></div>' +
+      '<div class="brief-head"><div><div class="brief-kicker">Current analysis</div><div class="brief-generator">' + esc(generator) + '</div></div><span class="tag">AI brief</span></div>' +
       '<div class="brief-score ' + severityClass + '"><strong>' + esc(score) + '</strong><span>risk<br>out of 100</span></div>' +
       '<div class="brief-title">' + esc(brief.headline || 'Risk summary') + '</div>' +
       '<p class="brief-assessment">' + esc(brief.assessment || '') + '</p>' +
@@ -559,8 +515,47 @@
     if (!$('ai-model').value) $('ai-model').value = ai.model || '';
     $('ai-base-url').value = ai.base_url || AI_URL_DEFAULTS[ai.provider || 'anthropic'];
     $('ai-settings-status').textContent = ai.configured
-      ? (ai.provider === 'anthropic' ? 'Claude' : ai.provider) + ' configured' : 'Rule engine only';
+      ? (ai.provider === 'anthropic' ? 'Claude' : ai.provider) + ' configured' : 'AI not configured';
     updateAIFields(false);
+  }
+
+  function historySourceLabel(item) {
+    if (item.source === 'live') return item.account_id ? 'AWS ' + item.account_id : 'AWS account';
+    if (item.source === 'demo') return item.source_name || 'Bundled demo';
+    return item.source_name || 'Uploaded JSON';
+  }
+
+  function renderHistory() {
+    var list = $('history-list');
+    var message = $('history-message');
+    if (!list || !message) return;
+    $('history-count').textContent = state.historyItems.length + ' scan' + (state.historyItems.length === 1 ? '' : 's');
+    message.hidden = !state.historyError;
+    message.textContent = state.historyError || '';
+    message.style.borderColor = 'var(--n-crit)';
+    message.style.color = 'var(--n-crit)';
+    if (state.historyStatus === 'loading' && !state.historyItems.length) {
+      list.innerHTML = '<div class="history-empty">Loading saved analyses…</div>';
+      return;
+    }
+    if (!state.historyItems.length) {
+      list.innerHTML = '<div class="history-empty">No completed analyses have been saved yet. Run a demo, upload, or AWS scan to create the first entry.</div>';
+      return;
+    }
+    list.innerHTML = state.historyItems.map(function (item) {
+      var timestamp = new Date(item.created_at);
+      var dateText = isNaN(timestamp.getTime()) ? item.created_at : timestamp.toLocaleString([], {
+        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      var current = Number(item.id) === Number(state.currentScanId);
+      return '<div class="history-row' + (current ? ' current' : '') + '">' +
+        '<div class="history-primary"><strong>' + esc(historySourceLabel(item)) + '</strong>' +
+        '<span>Scan #' + esc(item.id) + (current ? ' · currently open' : '') + '</span></div>' +
+        '<div class="history-time">' + esc(dateText) + '<span>' + esc(item.status || 'complete') + '</span></div>' +
+        '<div class="history-metrics"><span>' + esc(item.finding_count) + ' findings</span><span>' + esc(item.identity_count) + ' identities</span><span>' + esc(item.path_count) + ' paths</span></div>' +
+        '<div class="history-row-actions"><button class="btn btn-sm" type="button" data-history-open="' + esc(item.id) + '">' + (current ? 'Reopen' : 'Open') + '</button>' +
+        '<button class="btn btn-sm btn-danger" type="button" data-history-delete="' + esc(item.id) + '">Delete</button></div></div>';
+    }).join('');
   }
 
   function renderResultState() {
@@ -794,56 +789,91 @@
       return;
     }
     var real = state.data.remediations[f.id];
+    var loadState = state.remediationLoads[f.id];
 
-    /* Prefer the backend's own remediation for this finding; the local
-       strategy table is only used in the offline preview. */
-    var actions, hardened, original, compliance, score, summary, validation, requiredInputs;
-    if (real) {
-      actions = (real.actions || []).map(function (a) {
-        return {
-          name: a.action || '', priority: String(a.priority || 'MEDIUM').toUpperCase(),
-          description: a.description || '',
-          code: typeof a.code_example === 'string' ? a.code_example : JSON.stringify(a.code_example, null, 2),
-          explanation: a.explanation || ''
-        };
-      });
-      hardened = real.hardened_policy || {};
-      original = real.original_policy || {};
-      compliance = real.compliance_notes || [];
-      score = real.risk_score;
-      summary = real.summary || '';
-      validation = real.validation || {};
-      requiredInputs = real.required_inputs || [];
-    } else {
-      var strategy = strategyFor(f);
-      actions = (STRATEGY_ACTIONS[strategy] || STRATEGY_ACTIONS.attach_policy).map(function (a) {
-        return { name: a.name, priority: a.priority, description: a.description, code: JSON.stringify(a.code, null, 2), explanation: a.explanation };
-      });
-      hardened = strategy === 'managed_policy_review'
-        ? { attached_policy_arn: 'scoped-replacement-required' }
-        : { Version: '2012-10-17', Statement: [{
-            Effect: 'Allow',
-            Action: strategy === 'access_key' ? ['iam:CreateAccessKey'] : strategy === 'pass_role' ? ['iam:PassRole'] : ['iam:CreateAccessKey', 'iam:PassRole'],
-            Resource: strategy === 'access_key' ? ['arn:aws:iam::<ACCOUNT_ID>:user/${aws:username}'] : ['arn:aws:iam::<ACCOUNT_ID>:role/<ALLOWED_ROLE_NAME>']
-          }] };
-      compliance = ['CIS AWS Foundations Benchmark', 'NIST 800-53 Access Control Family'];
-      score = RISK_BY_SEV[f.severity];
-      summary = 'Vulnerability in ' + f.resource + ': ' + f.title + '.';
-      original = f.policy_document && f.policy_document.statement
-        ? { Version: '2012-10-17', Statement: [f.policy_document.statement] } : {};
-      validation = { status: 'review_required', policy_structure: 'unknown', conditions_preserved: false, change_present: false, export_ready: false, modeled_impact: 'not_run' };
-      requiredInputs = ['Backend connection'];
+    if ((!real || real.source !== 'ai') && !loadState && !STATIC_PREVIEW) {
+      requestFindingRemediation(f);
+      return;
     }
+
+    if (loadState && loadState.status === 'loading') {
+      $('rem-header').innerHTML =
+        '<div class="row"><div style="flex:1;min-width:220px"><div class="title">' + esc(f.title) + '</div>' +
+        '<div class="facts"><span>' + esc(f.id) + '</span><span>' + esc(f.resource) + '</span><span>AI assessment in progress</span></div></div></div>' +
+        '<div class="rem-summary">AI is assessing the privilege-escalation path and generating a least-privilege IAM policy.</div>';
+      $('rem-actions').innerHTML = '<div class="panel"><div class="panel-body" style="color:var(--n-mute)">Generating assessment, actions, and hardened policy…</div></div>';
+      state.currentPolicy = { original: {}, proposed: {}, validation: { status: 'generating', export_ready: false }, requiredInputs: [] };
+      renderPolicyWorkbench();
+      $('compliance').innerHTML = '<div>Compliance mappings will appear with the AI assessment.</div>';
+      $('queue-mini').innerHTML = queueHtml(5) || '<div class="empty-panel">Queue is empty.</div>';
+      return;
+    }
+
+    if (!real || real.source !== 'ai') {
+      var unavailableReason = real && real.error
+        ? real.error
+        : 'AI did not return a valid remediation. No rule-based substitute was generated.';
+      var unavailableOriginal = real && real.original_policy
+        ? real.original_policy
+        : (f.policy_document && f.policy_document.statement
+          ? { Version: '2012-10-17', Statement: [f.policy_document.statement] }
+          : {});
+      $('rem-header').innerHTML =
+        '<div class="row"><div style="flex:1;min-width:220px">' +
+        '<div class="title">' + esc(f.title) + '</div>' +
+        '<div class="facts"><span>' + esc(f.id) + '</span><span>' + esc(f.resource) + '</span><span style="color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span><span>AI unavailable</span></div>' +
+        '</div></div><div class="rem-summary">' + esc(unavailableReason) + '</div>';
+      $('rem-actions').innerHTML = '<div class="panel"><div class="panel-body" style="color:var(--n-mute)">' +
+        'No AI-generated remediation actions are available for this finding.' +
+        (!STATIC_PREVIEW ? '<button class="btn btn-sm" data-remediation-retry="' + esc(f.id) + '">Retry AI assessment</button>' : '') +
+        '</div></div>';
+      state.currentPolicy = {
+        original: unavailableOriginal,
+        proposed: {},
+        validation: real && real.validation ? real.validation : { status: 'no_proposal', export_ready: false },
+        requiredInputs: []
+      };
+      renderPolicyWorkbench();
+      $('compliance').innerHTML = '<div>No AI-generated compliance mappings are available.</div>';
+      $('queue-mini').innerHTML = queueHtml(5) || '<div class="empty-panel">Queue is empty.</div>';
+      return;
+    }
+
+    /* Only render a validated AI response. Deterministic substitute advice is
+       intentionally disabled so provider failures stay visible. */
+    var actions, risks, recommendations, hardened, original, compliance, score, summary, validation, requiredInputs;
+    actions = (real.actions || []).map(function (a) {
+      return {
+        name: a.action || '', priority: String(a.priority || 'MEDIUM').toUpperCase(),
+        description: a.description || '',
+        code: typeof a.code_example === 'string' ? a.code_example : JSON.stringify(a.code_example, null, 2),
+        explanation: a.explanation || ''
+      };
+    });
+    risks = Array.isArray(real.risks) ? real.risks : [];
+    recommendations = Array.isArray(real.recommendations) ? real.recommendations : [];
+    hardened = real.hardened_policy || {};
+    original = real.original_policy || {};
+    compliance = real.compliance_notes || [];
+    score = real.risk_score;
+    summary = real.summary || '';
+    validation = real.validation || {};
+    requiredInputs = real.required_inputs || [];
 
     $('rem-header').innerHTML =
       '<div class="row"><div style="flex:1;min-width:220px">' +
       '<div class="title">' + esc(f.title) + '</div>' +
       '<div class="facts"><span>' + esc(f.id) + '</span><span>' + esc(f.resource) + '</span><span style="color:' + SEV_VAR[f.severity] + '">' + esc(f.severity) + '</span>' +
-      (real ? '<span>' + esc(real.source === 'ai' ? 'AI remediation' : 'rule engine') + '</span>' : '') + '</div>' +
+      '<span>AI remediation</span></div>' +
       '</div><div style="text-align:right"><div class="score">' + esc(score) + '/100</div><div class="score-label">risk score</div></div></div>' +
       '<div class="rem-summary">' + esc(summary) + '</div>';
 
-    $('rem-actions').innerHTML = actions.map(function (a) {
+    var assessmentHtml = (risks.length || recommendations.length)
+      ? '<div class="panel"><div class="panel-head"><span class="panel-title">AI policy assessment</span></div><div class="panel-body">' +
+        (risks.length ? '<div><strong>Risks</strong><div class="checklist">' + risks.map(function (risk) { return '<div><span>!</span><span>' + esc(risk) + '</span></div>'; }).join('') + '</div></div>' : '') +
+        (recommendations.length ? '<div><strong>Recommendations</strong><div class="checklist">' + recommendations.map(function (item) { return '<div><span>→</span><span>' + esc(item) + '</span></div>'; }).join('') + '</div></div>' : '') +
+        '</div></div>' : '';
+    $('rem-actions').innerHTML = assessmentHtml + actions.map(function (a) {
       var color = a.priority === 'CRITICAL' ? 'var(--n-crit)' : a.priority === 'HIGH' ? 'var(--n-high)' : 'var(--n-med)';
       return '<div class="panel"><div class="panel-head"><span class="panel-title" style="flex:1 1 auto">' + esc(a.name) + '</span>' +
         '<span class="tag" style="border-color:' + color + ';color:' + color + '">' + esc(a.priority) + '</span></div>' +
@@ -856,6 +886,45 @@
     renderPolicyWorkbench();
     $('compliance').innerHTML = compliance.map(function (c) { return '<div><span>↳</span><span>' + esc(c) + '</span></div>'; }).join('') || '<div>No compliance mappings returned.</div>';
     $('queue-mini').innerHTML = queueHtml(5) || '<div class="empty-panel">Queue is empty.</div>';
+  }
+
+  function requestFindingRemediation(finding) {
+    if (!finding || STATIC_PREVIEW) return;
+    var id = finding.id;
+    state.remediationLoads[id] = { status: 'loading', error: '' };
+    renderRemediation();
+    postJSON('/api/remediate', {
+      history_id: state.currentScanId,
+      finding: {
+        id: finding.id,
+        pattern_id: finding.pattern_id || '',
+        title: finding.title,
+        description: finding.description,
+        severity: finding.severity,
+        resource_type: finding.resource_type,
+        resource_name: finding.resource,
+        policy_document: finding.policy_document || {},
+        attack_path: finding.attack_path_steps || [],
+        mitre_techniques: finding.mitre || [],
+        remediation_hint: finding.remediation_hint || '',
+        detection_source: finding.detection_source || 'rule'
+      }
+    }).then(function (payload) {
+      var remediation = payload.remediation || {};
+      state.data.remediations[id] = remediation;
+      state.remediationLoads[id] = {
+        status: remediation.source === 'ai' ? 'ready' : 'error',
+        error: remediation.error || ''
+      };
+      if (state.selId === id) renderRemediation();
+    }).catch(function (error) {
+      state.remediationLoads[id] = { status: 'error', error: error.message || 'AI assessment failed.' };
+      state.data.remediations[id] = {
+        vulnerability_id: id, source: 'unavailable', actions: [], hardened_policy: {},
+        error: error.message || 'AI assessment failed.'
+      };
+      if (state.selId === id) renderRemediation();
+    });
   }
 
   function policyDiff(original, proposed) {
@@ -893,6 +962,8 @@
     var checks = [
       ['Policy structure', validation.policy_structure || 'unknown', validation.policy_structure === 'passed'],
       ['Original conditions preserved', validation.conditions_preserved ? 'passed' : 'review', !!validation.conditions_preserved],
+      ['Condition keys match actions', validation.condition_keys_supported ? 'passed' : 'review', !!validation.condition_keys_supported],
+      ['No new privileges introduced', validation.no_new_privileges ? 'passed' : 'review', !!validation.no_new_privileges],
       ['Change present', validation.change_present ? 'passed' : 'review', !!validation.change_present],
       ['Modeled impact', validation.modeled_impact === 'not_run' ? 'not run' : validation.modeled_impact, false]
     ];
@@ -1232,8 +1303,11 @@
     if (view === 'visualizer') renderVisualizer();
     if (view === 'organization') renderOrganization();
     if (view === 'charts') renderCharts();
+    if (view === 'history') renderHistory();
     if (view === 'settings') renderSettings();
-    try { history.replaceState(null, '', '#' + view); } catch (e) {}
+    try {
+      history.replaceState(null, '', '#' + view + (state.currentScanId ? '?scan=' + state.currentScanId : ''));
+    } catch (e) {}
   }
 
   function renderAll() {
@@ -1241,7 +1315,7 @@
     if (!state.selId && state.data.findings.length) state.selId = state.data.findings[0].id;
     renderNav(); renderTopbar();
     renderOverview(); renderInspector(); renderFindings();
-    renderRemediation(); renderVisualizer(); renderOrganization(); renderCharts();
+    renderRemediation(); renderVisualizer(); renderOrganization(); renderCharts(); renderHistory();
     renderGraphDetail(); renderSettings(); renderRiskBrief();
     configureStaticPreview();
   }
@@ -1261,6 +1335,7 @@
 
   function beginAnalysis(label) {
     state.requestSerial += 1;
+    state.currentScanId = null;
     state.analysisStatus = 'loading';
     state.analysisError = '';
     $('status-text').textContent = label || 'Analyzing…';
@@ -1276,30 +1351,26 @@
     state.data = normalise(payload);
     if (!state.organizationLocked) state.organization = state.data.organization;
     state.selId = null;
+    state.remediationLoads = {};
     state.selectedPath = null;
     state.selectedEvidence = 0;
     state.analysisError = '';
     state.analysisStatus = state.data.coverage && !state.data.coverage.complete ? 'partial'
       : state.data.findings.length ? 'complete' : 'empty';
-    state.scanTime = new Date();
+    state.currentScanId = payload && payload.history ? Number(payload.history.id) : null;
+    if (state.currentScanId) {
+      localStorage.setItem('winnow-last-scan-id', String(state.currentScanId));
+      try { history.replaceState(null, '', '#' + state.view + '?scan=' + state.currentScanId); } catch (e) {}
+    }
+    state.scanTime = payload && payload.history && payload.history.created_at
+      ? new Date(payload.history.created_at) : new Date();
     var d = state.data;
     var engine = d.aiCount ? 'graph + rule + AI' : 'graph + rule engine';
     var prefix = d.source === 'live' && d.accountId ? ('AWS ' + d.accountId + ' · ') : (engine + ' · ');
     $('status-text').textContent = prefix + d.findings.length + ' findings · ' + d.escalationPaths + ' escalation paths';
     renderAll();
     remountGraph();
-  }
-
-  function fallbackOffline(msg) {
-    state.data = normalise(null);
-    if (!state.organizationLocked) state.organization = state.data.organization;
-    state.selId = null;
-    state.analysisStatus = 'partial';
-    state.analysisError = '';
-    state.scanTime = new Date();
-    $('status-text').textContent = msg || 'Demo dataset · offline';
-    renderAll();
-    remountGraph();
+    if (payload && payload.history) loadHistory();
   }
 
   function failAnalysis(message, source, sourceName, requestId) {
@@ -1315,6 +1386,7 @@
     });
     if (!state.organizationLocked) state.organization = state.data.organization;
     state.selId = null;
+    state.remediationLoads = {};
     state.analysisStatus = 'error';
     state.analysisError = message;
     state.scanTime = new Date();
@@ -1349,7 +1421,11 @@
     postJSON('/api/generate-dummy')
       .then(function (j) { return postJSON(API, { iam_config: j.iam_config, config_type: 'terraform', source: 'demo', source_name: 'Bundled IAM scenario' }); })
       .then(function (payload) { applyResult(payload, requestId); })
-      .catch(function () { if (requestId === state.requestSerial) fallbackOffline('Demo dataset · backend offline'); });
+      .catch(function (error) {
+        if (requestId === state.requestSerial) {
+          failAnalysis(error && error.message ? error.message : 'The backend is unavailable.', 'demo', 'Bundled IAM scenario', requestId);
+        }
+      });
   }
 
   function requestJSON(path, method, body) {
@@ -1376,6 +1452,104 @@
       state.settings = payload;
       renderSettings();
     }).catch(function () { setSettingsMessage('Settings are unavailable while the backend is offline.', true); });
+  }
+
+  function loadHistory() {
+    if (STATIC_PREVIEW) return Promise.resolve();
+    state.historyStatus = 'loading';
+    state.historyError = '';
+    renderHistory();
+    return fetch('/api/history').then(function (r) {
+      return r.json().then(function (payload) {
+        if (!r.ok || payload.error) throw new Error(payload.error || 'Could not load scan history.');
+        return payload;
+      });
+    }).then(function (payload) {
+      state.historyItems = payload.runs || [];
+      state.historyStatus = 'ready';
+      renderHistory(); renderNav(); renderTopbar();
+    }).catch(function (error) {
+      state.historyStatus = 'error';
+      state.historyError = error.message || 'Could not load scan history.';
+      renderHistory();
+    });
+  }
+
+  function resetToEmptyAnalysis() {
+    state.data = normalise({
+      vulnerabilities: [], remediations: [],
+      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
+      risk_brief: null,
+      summary: {
+        source: 'demo', source_name: 'No scan started',
+        identity_count: 0, policy_count: 0, escalation_paths: 0,
+        coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
+        ai_status: 'enabled'
+      }
+    });
+    state.currentScanId = null;
+    state.scanTime = null;
+    state.selId = null;
+    state.remediationLoads = {};
+    state.analysisStatus = 'idle';
+    localStorage.removeItem('winnow-last-scan-id');
+    renderAll();
+  }
+
+  function restoreSavedAnalysis(runId, navigate) {
+    if (STATIC_PREVIEW) return Promise.resolve(false);
+    var path = runId ? '/api/history/' + encodeURIComponent(runId) : '/api/history/latest';
+    $('status-text').textContent = 'Restoring saved analysis…';
+    return fetch(path).then(function (r) {
+      return r.json().then(function (payload) {
+        if (!r.ok || payload.error) throw new Error(payload.error || 'Could not restore the saved analysis.');
+        return payload;
+      });
+    }).then(function (payload) {
+      if (!payload.available && !payload.analysis) {
+        resetToEmptyAnalysis();
+        loadHistory();
+        return false;
+      }
+      applyResult(payload.analysis);
+      $('status-text').textContent = 'Restored scan #' + state.currentScanId + ' · ' + state.data.findings.length + ' findings';
+      if (navigate) goTo('overview');
+      return true;
+    }).catch(function (error) {
+      state.historyError = error.message || 'Could not restore the saved analysis.';
+      loadHistory();
+      return false;
+    });
+  }
+
+  function deleteSavedAnalysis(runId) {
+    var item = state.historyItems.filter(function (entry) { return Number(entry.id) === Number(runId); })[0];
+    if (!window.confirm('Delete ' + (item ? historySourceLabel(item) : 'this saved analysis') + '? This cannot be undone.')) return;
+    requestJSON('/api/history/' + encodeURIComponent(runId), 'DELETE').then(function () {
+      var wasCurrent = Number(state.currentScanId) === Number(runId);
+      return loadHistory().then(function () {
+        if (wasCurrent) return restoreSavedAnalysis(null, false);
+        return true;
+      });
+    }).catch(function (error) {
+      state.historyError = error.message || 'Could not delete the saved analysis.';
+      renderHistory();
+    });
+  }
+
+  function clearSavedHistory() {
+    if (!state.historyItems.length) return;
+    if (!window.confirm('Delete every saved analysis? This cannot be undone.')) return;
+    requestJSON('/api/history', 'DELETE').then(function () {
+      state.historyItems = [];
+      state.historyStatus = 'ready';
+      state.historyError = '';
+      resetToEmptyAnalysis();
+      goTo('history');
+    }).catch(function (error) {
+      state.historyError = error.message || 'Could not clear scan history.';
+      renderHistory();
+    });
   }
 
   function loadOrganization() {
@@ -1555,6 +1729,14 @@
     var policyView = e.target.closest('[data-policy-view]');
     if (policyView) { state.policyView = policyView.getAttribute('data-policy-view'); renderPolicyWorkbench(); return; }
 
+    var remediationRetry = e.target.closest('[data-remediation-retry]');
+    if (remediationRetry) {
+      var retryId = remediationRetry.getAttribute('data-remediation-retry');
+      delete state.remediationLoads[retryId];
+      requestFindingRemediation(findingById(retryId));
+      return;
+    }
+
     var pathRemediate = e.target.closest('[data-path-remediate]');
     if (pathRemediate) { state.selId = pathRemediate.getAttribute('data-path-remediate'); state.policyView = 'diff'; renderRemediation(); goTo('remediation'); return; }
 
@@ -1581,6 +1763,12 @@
       renderGraphDetail();
     }
 
+    var historyOpen = e.target.closest('[data-history-open]');
+    if (historyOpen) { restoreSavedAnalysis(historyOpen.getAttribute('data-history-open'), true); return; }
+
+    var historyDelete = e.target.closest('[data-history-delete]');
+    if (historyDelete) { deleteSavedAnalysis(historyDelete.getAttribute('data-history-delete')); return; }
+
     var nav = e.target.closest('[data-goto]');
     if (nav) { goTo(nav.getAttribute('data-goto')); return; }
 
@@ -1590,6 +1778,7 @@
     if (e.target.closest('#reanalyze') || e.target.closest('[data-load-demo]')) { analyze(); return; }
     if (e.target.closest('#scan-aws') || e.target.closest('[data-scan-aws]')) { scanAccount(); return; }
     if (e.target.closest('#scan-organization')) { scanOrganization(); return; }
+    if (e.target.closest('#clear-history')) { clearSavedHistory(); return; }
     if (e.target.closest('#analyze-upload')) { analyzeUpload(); return; }
     if (e.target.closest('#remove-aws-settings')) { removeAWSSettings(); return; }
     if (e.target.closest('#remove-ai-settings')) { removeAISettings(); return; }
@@ -1648,16 +1837,33 @@
      so nothing needs the browser's saved scroll position. */
   try { history.scrollRestoration = 'manual'; } catch (e) {}
 
+  if (!STATIC_PREVIEW) {
+    state.data = normalise({
+      vulnerabilities: [], remediations: [],
+      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
+      risk_brief: null,
+      summary: {
+        source: 'demo', source_name: 'No scan started',
+        identity_count: 0, policy_count: 0, escalation_paths: 0,
+        coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
+        ai_status: 'enabled'
+      }
+    });
+  }
   applyTheme();
   renderAll();
   configureStaticPreview();
   /* Default the hash BEFORE using it: on a plain visit location.hash is '',
      and the old one-liner tested the defaulted value but passed the raw one,
      so goTo('') matched no section and the whole app booted blank. */
-  var initialView = (location.hash || '').slice(1);
+  var initialHash = (location.hash || '').slice(1);
+  var hashParts = initialHash.split('?');
+  var initialView = hashParts[0];
+  var initialParams = new URLSearchParams(hashParts[1] || '');
+  var requestedScanId = initialParams.get('scan');
   goTo(initialView in TITLES ? initialView : 'overview');
   window.scrollTo(0, 0);
   loadSettings();
   loadOrganization();
-  analyze();
+  if (!STATIC_PREVIEW) restoreSavedAnalysis(requestedScanId, false);
 })();

@@ -190,8 +190,8 @@
           <span class="spacer"></span>
           <span class="hint" id="shown-count">21 of 21</span>
         </div>
-        <div class="panel">
-          <table>
+        <div class="panel findings-panel">
+          <table class="findings-table">
             <thead>
               <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Resource</th><th>MITRE</th><th></th></tr>
             </thead>
@@ -341,6 +341,29 @@
         </div>
       </section>
 
+      <!-- SCAN HISTORY -->
+      <section class="view" data-view="history">
+        <div class="panel history-hero">
+          <div>
+            <span class="eyebrow">Local analysis archive</span>
+            <h2>Scan history</h2>
+            <p>Completed analyses are saved locally on this machine. Reopen a previous result without rescanning or sending another AI request.</p>
+          </div>
+          <div class="history-actions">
+            <button class="btn" type="button" data-goto="overview">New scan</button>
+            <button class="btn btn-danger" type="button" id="clear-history">Clear history</button>
+          </div>
+        </div>
+        <div class="source-message history-message" id="history-message" role="status" hidden></div>
+        <div class="panel history-panel">
+          <div class="panel-head">
+            <div><span class="panel-title">Recent analyses</span><div class="panel-meta">The latest 30 completed scans are retained</div></div>
+            <span class="panel-meta" id="history-count">0 scans</span>
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </div>
+      </section>
+
       <!-- SETTINGS -->
       <section class="view" data-view="settings">
         <div class="settings-intro">
@@ -369,9 +392,9 @@
           </form>
 
           <form class="panel settings-card" id="ai-settings-form">
-            <div class="panel-head"><div><span class="panel-title">AI assistant</span><div class="panel-meta" id="ai-settings-status">Rule engine only</div></div><span class="tag">Optional</span></div>
+            <div class="panel-head"><div><span class="panel-title">AI assistant</span><div class="panel-meta" id="ai-settings-status">AI not configured</div></div><span class="tag">Required for reports</span></div>
             <div class="panel-body">
-              <p class="settings-copy">Choose a provider for the optional AI finding and remediation pass. Winnow sends a short test prompt to verify the URL, key, and model before saving. The deterministic rule engine remains available without one.</p>
+              <p class="settings-copy">Choose a provider for AI-generated risk reports and remediation proposals. Winnow sends a short test prompt to verify the URL, key, and model before saving. Without a working provider, findings remain visible but reports and remediation advice are marked unavailable.</p>
               <label class="field-label" for="ai-provider">Provider</label>
               <select class="settings-input" id="ai-provider"><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="ollama">Ollama</option></select>
               <label class="field-label" for="ai-model">Model <span>optional</span></label>

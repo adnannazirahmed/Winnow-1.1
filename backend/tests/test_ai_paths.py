@@ -44,14 +44,21 @@ GOOD_REMEDIATION = '''Sure, here is the analysis:
 ```json
 {"summary": "Risky", "risk_score": 88, "actions": [{"action": "Fix it", "description": "d",
  "priority": "CRITICAL", "code_example": "{}", "explanation": "e"}],
- "hardened_policy": {"Version": "2012-10-17"}, "compliance_notes": ["CIS 1.16"]}
+ "hardened_policy": {"Version": "2012-10-17", "Statement": [
+   {"Effect": "Allow", "Action": "iam:AttachUserPolicy", "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>"}
+ ]}, "compliance_notes": ["CIS 1.16"]}
 ```'''
 
 
 class TestRemediatorAIPath(unittest.TestCase):
     def setUp(self):
         self.analyzer = IAMAnalyzer()
-        self.vulns = self.analyzer.analyze(self.analyzer.generate_dummy_data(), 'terraform')
+        self.vulns = [
+            vuln for vuln in self.analyzer.analyze(
+                self.analyzer.generate_dummy_data(), 'terraform'
+            )
+            if (vuln.get('policy_document') or {}).get('statement')
+        ]
 
     def _remediator(self, replies, max_calls=5):
         with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key',
@@ -68,26 +75,31 @@ class TestRemediatorAIPath(unittest.TestCase):
         self.assertEqual(result['risk_score'], 88)
         self.assertEqual(result['actions'][0]['action'], 'Fix it')
 
-    def test_unparseable_response_falls_back_gracefully(self):
+    def test_unparseable_response_is_explicitly_unavailable(self):
         rem = self._remediator(['I cannot help with that.'])
         result = rem.get_remediation(self.vulns[0])
-        self.assertEqual(result['source'], 'rule')
-        self.assertTrue(result['actions'])
+        self.assertEqual(result['source'], 'unavailable')
+        self.assertEqual(result['actions'], [])
+        self.assertEqual(result['validation']['status'], 'no_proposal')
 
-    def test_api_exception_falls_back(self):
+    def test_api_exception_is_explicitly_unavailable(self):
         rem = self._remediator([RuntimeError('rate limited')])
         result = rem.get_remediation(self.vulns[0])
-        self.assertEqual(result['source'], 'rule')
-        self.assertTrue(result['actions'])
+        self.assertEqual(result['source'], 'unavailable')
+        self.assertEqual(result['actions'], [])
+        self.assertIn('RuntimeError', result['error'])
 
     def test_ai_calls_are_capped_per_batch(self):
-        """The core fan-out fix: 21 findings must not trigger 21 API calls."""
+        """A large finding set must not trigger one call per finding."""
         rem = self._remediator([GOOD_REMEDIATION], max_calls=3)
         results = rem.batch_remediate(self.vulns)
         self.assertEqual(len(results), len(self.vulns))
         self.assertLessEqual(rem.client.messages.calls, 3,
                              "AI calls exceeded the configured per-batch cap")
-        self.assertTrue(all(r['actions'] for r in results))
+        self.assertEqual(results[0]['source'], 'ai')
+        limited = [r for r in results if 'call limit' in r.get('error', '')]
+        self.assertTrue(limited)
+        self.assertTrue(all(not r['actions'] for r in limited))
 
     def test_identical_findings_hit_cache_not_the_api(self):
         rem = self._remediator([GOOD_REMEDIATION], max_calls=50)
@@ -98,6 +110,78 @@ class TestRemediatorAIPath(unittest.TestCase):
             rem.get_remediation(dict(vuln))
         self.assertEqual(rem.client.messages.calls, first_calls,
                          "Repeated identical findings should be served from cache")
+
+    def test_policy_explainer_shape_is_normalized(self):
+        response = '''{
+          "summary": "The policy permits broad attachment.",
+          "risk_score": 90,
+          "risks": ["Arbitrary managed policies can be attached."],
+          "recommendations": ["Restrict attachment to an approved user and policy."],
+          "hardened_policy": {
+            "Statement": {
+              "Effect": "Allow",
+              "Action": "iam:AttachUserPolicy",
+              "Resource": "arn:aws:iam::<ACCOUNT_ID>:user/<TARGET_USER_NAME>"
+            }
+          }
+        }'''
+        rem = self._remediator([response])
+        result = rem.get_remediation(self.vulns[0])
+        self.assertEqual(result['source'], 'ai')
+        self.assertEqual(len(result['hardened_policy']['Statement']), 1)
+        self.assertEqual(result['risks'][0], 'Arbitrary managed policies can be attached.')
+        self.assertEqual(len(result['actions']), 1)
+
+    def test_invalid_first_policy_is_repaired_once(self):
+        invalid = '''{
+          "summary": "Assessment", "actions": [{"action": "Review"}],
+          "hardened_policy": {"Version": "2012-10-17", "Statement": []}
+        }'''
+        rem = self._remediator([invalid, GOOD_REMEDIATION])
+        result = rem.get_remediation(self.vulns[0])
+        self.assertEqual(result['source'], 'ai')
+        self.assertEqual(rem.client.messages.calls, 2)
+
+    def test_policy_scope_validator_rejects_new_actions(self):
+        original = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': 'iam:GetUser', 'Resource': '*',
+        }]}
+        narrower = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': 'iam:GetUser',
+            'Resource': 'arn:aws:iam::123456789012:user/alice',
+        }]}
+        broader = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': ['iam:GetUser', 'iam:DeleteUser'],
+            'Resource': '*',
+        }]}
+        self.assertTrue(Remediator._does_not_broaden(original, narrower))
+        self.assertFalse(Remediator._does_not_broaden(original, broader))
+
+    def test_condition_keys_are_checked_against_actions(self):
+        original = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': 'iam:CreatePolicyVersion', 'Resource': '*',
+        }]}
+        wrong_key = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': 'iam:CreatePolicyVersion', 'Resource': '*',
+            'Condition': {'ArnEquals': {'iam:PolicyARN': 'arn:example'}},
+        }]}
+        pass_role = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Action': 'iam:PassRole', 'Resource': '*',
+            'Condition': {'StringEquals': {'iam:PassedToService': 'lambda.amazonaws.com'}},
+        }]}
+        self.assertEqual(
+            Remediator._unsupported_added_condition_keys(original, wrong_key),
+            ['iam:policyarn'],
+        )
+        self.assertEqual(
+            Remediator._unsupported_added_condition_keys(
+                {'Version': '2012-10-17', 'Statement': [{
+                    'Effect': 'Allow', 'Action': 'iam:PassRole', 'Resource': '*',
+                }]},
+                pass_role,
+            ),
+            [],
+        )
 
     def test_timeout_is_configured(self):
         with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'k', 'ANTHROPIC_TIMEOUT_SECONDS': '12'}):

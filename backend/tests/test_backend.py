@@ -80,18 +80,16 @@ class TestRemediator(unittest.TestCase):
         self.assertIn('full_admin', PATTERN_STRATEGY)
         self.assertIn('attached_managed_policy', PATTERN_STRATEGY)
 
-    def test_fallback_remediation_is_specific(self):
+    def test_missing_ai_returns_no_substitute_remediation(self):
         config = self.analyzer.generate_dummy_data()
         vulns = self.analyzer.analyze(config, 'terraform')
         results = self.remediator.batch_remediate(vulns)
         self.assertEqual(len(results), len(vulns))
         for vuln, rem in zip(vulns, results):
             self.assertEqual(rem['vulnerability_id'], vuln['id'])
-            self.assertTrue(rem['actions'])
-        # Known patterns should not fall through to the generic action.
-        attach_vuln = next(v for v in vulns if v['pattern_id'] == 'iam:AttachUserPolicy')
-        rem = self.remediator.get_remediation(attach_vuln)
-        self.assertIn('Attach', rem['actions'][0]['action'])
+            self.assertEqual(rem['source'], 'unavailable')
+            self.assertEqual(rem['actions'], [])
+            self.assertEqual(rem['hardened_policy'], {})
 
     def test_cache_rebinds_vulnerability_id(self):
         vuln_a = {'id': 'VULN-0001', 'pattern_id': 'iam:PassRole', 'title': 'Pass Role to Services',
@@ -110,16 +108,13 @@ class TestRemediator(unittest.TestCase):
         self.assertIsNone(parse('no json here'))
         self.assertIsNone(parse(''))
 
-    def test_hardened_condition_is_valid_shape(self):
+    def test_missing_ai_has_no_hardened_policy(self):
         vuln = {'id': 'VULN-0001', 'pattern_id': 'sts:AssumeRole', 'title': 'Role Assumption',
                 'severity': 'HIGH', 'resource_name': 'r1',
                 'policy_document': {'statement': {'Effect': 'Allow', 'Action': 'sts:AssumeRole', 'Resource': '*'}}}
         rem = self.remediator.get_remediation(vuln)
-        stmt = rem['hardened_policy']['Statement'][0]
-        cond = stmt.get('Condition', {})
-        # Condition values must be nested under operators, not bare keys.
-        for op, kv in cond.items():
-            self.assertIsInstance(kv, dict, f"Condition operator {op} must map to a dict")
+        self.assertEqual(rem['hardened_policy'], {})
+        self.assertEqual(rem['validation']['status'], 'no_proposal')
 
 
 class TestVisualizer(unittest.TestCase):

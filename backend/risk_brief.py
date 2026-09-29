@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +39,11 @@ Return only one JSON object with this exact shape:
 
 Use at most three key_risk_ids. If there are no findings, use an empty top_priority_id and an empty key_risk_ids list."""
 
+    # An executive brief only needs the highest-risk evidence. Sending every
+    # verbose finding can exhaust a provider's context window on large scans
+    # and cause a truncated (therefore invalid) JSON response.
+    PROMPT_FINDING_LIMIT = 24
+
     def __init__(self, provider: Optional[AIProvider] = None):
         self.provider = provider or AIProvider()
         self._cache: Dict[str, Dict[str, Any]] = {}
@@ -52,7 +58,6 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
                  remediation_results: List[Dict[str, Any]],
                  visualization: Dict[str, Any]) -> Dict[str, Any]:
         evidence = self._evidence(summary, findings, remediation_results, visualization)
-        fallback = self._fallback(evidence)
         cache_key = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, default=str).encode('utf-8')
         ).hexdigest()
@@ -61,17 +66,33 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
             if cached is not None:
                 return copy.deepcopy(cached)
 
-        brief = fallback
-        if self.enabled:
-            try:
-                prompt = "Complete Winnow analysis:\n" + json.dumps(evidence, indent=2, default=str)
-                raw = self.provider.complete(self.SYSTEM_PROMPT, prompt, 1400)
-                candidate = self._parse_object(raw)
-                if candidate:
-                    brief = self._ground(candidate, evidence, fallback)
-            except Exception as exc:
-                logger.warning('AI risk brief failed; using deterministic brief: %s', type(exc).__name__)
+        if not self.enabled:
+            return self._unavailable(evidence, 'AI provider is not configured.')
 
+        try:
+            prompt_evidence = self._prompt_evidence(evidence)
+            prompt = "Complete Winnow analysis:\n" + json.dumps(
+                prompt_evidence, indent=2, default=str
+            )
+            raw = self.provider.complete(self.SYSTEM_PROMPT, prompt, 2000)
+            candidate = self._parse_object(raw)
+            if not candidate:
+                return self._unavailable(evidence, 'AI provider returned invalid JSON.')
+            brief = self._ground(candidate, evidence)
+            if brief is None:
+                return self._unavailable(
+                    evidence,
+                    'AI provider returned an incomplete or ungrounded report.',
+                )
+        except Exception as exc:
+            logger.warning('AI risk brief failed: %s', type(exc).__name__)
+            return self._unavailable(
+                evidence,
+                f'AI request failed: {type(exc).__name__}.',
+            )
+
+        # Only successful AI reports are cached. A transient provider failure must
+        # be retried on the next scan instead of becoming a cached substitute.
         with self._cache_lock:
             if len(self._cache) >= self._cache_max:
                 self._cache.pop(next(iter(self._cache)))
@@ -150,85 +171,111 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
             ],
         }
 
-    def _fallback(self, evidence):
-        metrics = evidence['metrics']
-        findings = evidence['findings']
-        coverage = evidence.get('coverage') or {}
-        top = findings[0] if findings else None
-        resources = evidence.get('most_exposed_resources') or []
-        risk_score = int(resources[0].get('risk_score', 0)) if resources else (95 if metrics['critical'] else 75 if metrics['high'] else 0)
+    @classmethod
+    def _prompt_evidence(cls, evidence):
+        """Build a bounded, risk-ranked prompt without weakening grounding.
 
-        if metrics['critical']:
-            headline = 'Critical IAM escalation exposure'
-        elif metrics['high']:
-            headline = 'High-impact IAM weaknesses detected'
-        elif findings:
-            headline = 'IAM weaknesses require review'
-        else:
-            headline = 'No supported escalation path detected'
-
-        assessment = (
-            f"Winnow found {metrics['total_findings']} findings, including "
-            f"{metrics['critical']} critical and {metrics['high']} high-severity issues, "
-            f"across {metrics['identities']} identities. "
-            f"The analysis identified {metrics['escalation_paths']} candidate escalation paths."
+        The full evidence remains available to ``_ground`` and determines the
+        cache key. Only the provider payload is compacted.
+        """
+        severity_rank = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+        findings = sorted(
+            evidence.get('findings') or [],
+            key=lambda finding: (
+                severity_rank.get(str(finding.get('severity', '')).upper(), 4),
+                str(finding.get('id', '')),
+            ),
         )
-        if not findings:
-            assessment = (
-                f"Winnow found no supported escalation findings across {metrics['identities']} identities. "
-                "This result applies only to the permissions and resources included in the scan."
-            )
-
-        top_priority = self._priority(top, '') if top else None
-        next_action = ''
-        if top:
-            actions = (top.get('remediation') or {}).get('actions') or []
-            if actions:
-                next_action = actions[0].get('action') or actions[0].get('description', '')
-        if top_priority:
-            top_priority['next_action'] = next_action or 'Review and scope the affected permissions.'
-
-        warnings = coverage.get('warnings') or []
-        confidence = 'Complete supported-input coverage.' if coverage.get('complete', True) else 'The scan has coverage limitations.'
-        if warnings:
-            confidence += ' ' + ' '.join(str(w) for w in warnings[:2])
+        selected = []
+        for finding in findings[:cls.PROMPT_FINDING_LIMIT]:
+            compact = copy.deepcopy(finding)
+            compact['description'] = str(compact.get('description', ''))[:600]
+            compact['attack_path'] = (compact.get('attack_path') or [])[:8]
+            remediation = compact.get('remediation') or {}
+            remediation['actions'] = (remediation.get('actions') or [])[:3]
+            compact['remediation'] = remediation
+            selected.append(compact)
 
         return {
-            'generated_by': 'rules',
-            'provider': '',
-            'headline': headline,
-            'assessment': assessment,
-            'business_impact': (
-                f"A successful path could let an attacker expand access through {top.get('title', 'the highest-risk finding')}."
-                if top else 'No direct privilege-escalation impact was established by the supported checks.'
+            'metrics': copy.deepcopy(evidence.get('metrics') or {}),
+            'source': copy.deepcopy(evidence.get('source') or {}),
+            'coverage': copy.deepcopy(evidence.get('coverage') or {}),
+            'findings': selected,
+            'finding_selection': {
+                'included': len(selected),
+                'total': len(findings),
+                'method': 'highest severity, then finding ID',
+            },
+            'most_exposed_resources': copy.deepcopy(
+                (evidence.get('most_exposed_resources') or [])[:5]
             ),
-            'risk_score': max(0, min(100, risk_score)),
+        }
+
+    def _unavailable(self, evidence, reason):
+        """Return factual scan metadata without synthesizing a replacement report."""
+        metrics = evidence['metrics']
+        coverage = evidence.get('coverage') or {}
+        resources = evidence.get('most_exposed_resources') or []
+        warnings = coverage.get('warnings') or []
+        return {
+            'generated_by': 'unavailable',
+            'provider': self.provider.name if self.enabled else '',
+            'status': 'unavailable',
+            'error': reason,
+            'headline': '',
+            'assessment': '',
+            'business_impact': '',
+            'risk_score': 0,
             'metrics': copy.deepcopy(metrics),
-            'top_priority': top_priority,
-            'key_risks': [self._risk_item(item) for item in findings[:3]],
+            'top_priority': None,
+            'key_risks': [],
             'most_exposed_resources': copy.deepcopy(resources[:3]),
             'confidence': {
-                'level': 'high' if coverage.get('complete', True) and not warnings else 'limited',
-                'explanation': confidence,
+                'level': 'unavailable',
+                'explanation': reason,
                 'limitations': [str(w) for w in warnings[:3]],
             },
         }
 
-    def _ground(self, candidate, evidence, fallback):
+    def _ground(self, candidate, evidence):
         findings_by_id = {finding['id']: finding for finding in evidence['findings']}
+        headline = self._text(candidate.get('headline'), 120)
+        assessment = self._text(candidate.get('assessment'), 700)
+        business_impact = self._text(candidate.get('business_impact'), 420)
+        confidence_note = self._text(candidate.get('confidence_note'), 420)
+        if not all((headline, assessment, business_impact, confidence_note)):
+            return None
+
         top_id = self._text(candidate.get('top_priority_id'), 40)
         top = findings_by_id.get(top_id)
-        if not top and evidence['findings']:
-            top = evidence['findings'][0]
+        if evidence['findings'] and not top:
+            return None
+        if not evidence['findings'] and top_id:
+            return None
 
-        grounded = copy.deepcopy(fallback)
-        grounded.update({
+        resources = evidence.get('most_exposed_resources') or []
+        risk_score = int(resources[0].get('risk_score', 0)) if resources else 0
+        coverage = evidence.get('coverage') or {}
+        warnings = coverage.get('warnings') or []
+        grounded = {
             'generated_by': 'ai',
             'provider': self.provider.name,
-            'headline': self._text(candidate.get('headline'), 120) or fallback['headline'],
-            'assessment': self._text(candidate.get('assessment'), 700) or fallback['assessment'],
-            'business_impact': self._text(candidate.get('business_impact'), 420) or fallback['business_impact'],
-        })
+            'status': 'ready',
+            'error': '',
+            'headline': headline,
+            'assessment': assessment,
+            'business_impact': business_impact,
+            'risk_score': max(0, min(100, risk_score)),
+            'metrics': copy.deepcopy(evidence['metrics']),
+            'top_priority': None,
+            'key_risks': [],
+            'most_exposed_resources': copy.deepcopy(resources[:3]),
+            'confidence': {
+                'level': 'high' if coverage.get('complete', True) and not warnings else 'limited',
+                'explanation': confidence_note,
+                'limitations': [str(w) for w in warnings[:3]],
+            },
+        }
 
         if top:
             grounded['top_priority'] = self._priority(
@@ -239,9 +286,9 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
                 for action in (top.get('remediation') or {}).get('actions', [])
             ]
             requested_action = self._text(candidate.get('next_action'), 300)
+            # Never replace an ungrounded AI action with a deterministic one.
             grounded['top_priority']['next_action'] = (
-                requested_action if requested_action in allowed_actions
-                else (allowed_actions[0] if allowed_actions else fallback['top_priority']['next_action'])
+                requested_action if requested_action in allowed_actions else ''
             )
 
         requested_ids = candidate.get('key_risk_ids')
@@ -251,12 +298,7 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
                 finding = findings_by_id.get(str(finding_id))
                 if finding and finding not in selected:
                     selected.append(finding)
-            if selected:
-                grounded['key_risks'] = [self._risk_item(item) for item in selected]
-
-        confidence_note = self._text(candidate.get('confidence_note'), 420)
-        if confidence_note:
-            grounded['confidence']['explanation'] = confidence_note
+            grounded['key_risks'] = [self._risk_item(item) for item in selected]
         return grounded
 
     @staticmethod
@@ -294,11 +336,36 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
             value = json.loads(raw)
             return value if isinstance(value, dict) else None
         except (json.JSONDecodeError, TypeError):
-            start, end = raw.find('{'), raw.rfind('}')
-            if start < 0 or end <= start:
-                return None
+            pass
+
+        # Prefer complete fenced blocks when the model wraps its answer in
+        # Markdown. This also avoids braces that may appear in reasoning text.
+        fenced_candidates = []
+        for block in re.findall(r'```(?:json)?\s*(.*?)```', raw, re.IGNORECASE | re.DOTALL):
             try:
-                value = json.loads(raw[start:end + 1])
-                return value if isinstance(value, dict) else None
-            except json.JSONDecodeError:
-                return None
+                value = json.loads(block.strip())
+                if isinstance(value, dict):
+                    fenced_candidates.append(value)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if fenced_candidates:
+            return fenced_candidates[-1]
+
+        # Reasoning-capable providers may emit prose (and even example braces)
+        # before the final object. Decode every viable object and use the last
+        # one, which is where providers conventionally place the final answer.
+        decoder = json.JSONDecoder()
+        offset = 0
+        candidates = []
+        while True:
+            start = raw.find('{', offset)
+            if start < 0:
+                break
+            try:
+                value, end = decoder.raw_decode(raw, start)
+                if isinstance(value, dict):
+                    candidates.append((end, -start, value))
+            except (json.JSONDecodeError, TypeError):
+                pass
+            offset = start + 1
+        return max(candidates, key=lambda item: (item[0], item[1]))[2] if candidates else None

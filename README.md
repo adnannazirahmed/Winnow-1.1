@@ -42,7 +42,7 @@ flowchart TB
         grapheng["iam_graph — GraphBuilder → PolicyEvaluator → escalation<br/>21 techniques over the permission graph · FP filters"]
         rules["iam_analyzer.scan_iamdata — supplementary rule scan"]
         detector["ai_detector — optional AI second pass"]
-        remediator["remediator — cache · AI max 5/req · rule fallback"]
+        remediator["remediator — cache · AI max 5/req · explicit unavailable state"]
         brief["risk_brief — evidence-grounded AI executive summary"]
         org["organization_intelligence — identities · credential hygiene · change history"]
         visualizer["visualizer — permission graph + heatmap + timeline"]
@@ -53,7 +53,7 @@ flowchart TB
 
     aws[["AWS IAM (read-only)<br/>iam:GetAccountAuthorizationDetails<br/>sts:GetCallerIdentity"]]
     ai[["Optional AI provider<br/>Claude / Ollama / OpenAI / DeepSeek"]]
-    note>"Both external calls are optional. No key ⇒ graph + rule engine only.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
+    note>"No AI provider ⇒ findings still work, but reports/remediations are unavailable.<br/>No AWS creds ⇒ pasted configs still work. The AWS scan never calls a mutating API."]
 
     sources -->|"POST"| api
     brief -->|"response JSON — findings + remediations + visualization + risk brief"| ui
@@ -132,7 +132,7 @@ Winnow-1.1/
 │   ├── app.py              # Flask: routing, security headers, _run_pipeline, /api/scan-account
 │   ├── settings.py          # local AWS/AI connection settings stored in backend/.env
 │   ├── ai_provider.py       # Claude, Ollama, OpenAI, and DeepSeek adapter
-│   ├── risk_brief.py        # grounded AI summary with deterministic metrics and fallback
+│   ├── risk_brief.py        # grounded AI summary with explicit provider-failure state
 │   ├── organization_intelligence.py # identity inventory, anomaly rules, local snapshots
 │   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
@@ -202,7 +202,8 @@ and Gunicorn workers. Escalation-path IDs are `<identity>::<technique>`, not ran
 **Bounded AI usage.** The AI remediation pass is capped
 (`MAX_AI_REMEDIATIONS`, default 5 uncached calls per analysis) and cached by
 finding content, so a 200-finding config cannot trigger 200 API calls. Any
-API failure or unparseable response degrades cleanly to the rule engine.
+API failure or an unparseable response is shown as unavailable; Winnow does not
+substitute rule-generated report or remediation text.
 
 **Untrusted input.** IAM configs, and any text the model returns, are treated
 as untrusted: all values are HTML-escaped for text *and* attribute contexts,
@@ -292,9 +293,9 @@ AWS_DEFAULT_REGION=us-east-1
 IAM_VULNERABLE_ACCOUNT_ID=123456789012
 ```
 
-> **Note:** Without a configured AI provider the app runs entirely on the built-in
-> rule engine. Findings and remediations are still produced; only the
-> "AI Suggested" second-pass detection is skipped.
+> **Note:** Without a configured AI provider, the graph and rule engines still
+> produce factual findings. The executive report and remediation proposals remain
+> unavailable rather than being replaced with deterministic copy.
 
 The Settings screen sends one short request to the selected model and saves the
 configuration only when the URL, API key, and model work together.

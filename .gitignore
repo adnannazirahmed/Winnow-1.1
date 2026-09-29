@@ -24,10 +24,14 @@ Thumbs.db
 
 # Runtime logs
 *.log
+server.err
 backend/server.log
 backend/winnow_inventory.db
 backend/winnow_inventory.db-shm
 backend/winnow_inventory.db-wal
+backend/winnow_analysis.db
+backend/winnow_analysis.db-shm
+backend/winnow_analysis.db-wal
 
 # Editors
 .vscode/

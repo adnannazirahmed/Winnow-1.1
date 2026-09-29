@@ -96,29 +96,38 @@ class TestCompatibleAIProviders(unittest.TestCase):
             'AI_PROVIDER': 'openai', 'OPENAI_API_KEY': 'test-key',
             'AI_MODEL': 'model-a', 'OPENAI_BASE_URL': 'https://gateway.example/v1/',
         }, clear=True):
-            with mock.patch('ai_provider.httpx.post', return_value=FakeHTTPResponse({'choices': [{'message': {'content': 'answer'}}]})) as post:
+            with mock.patch('ai_provider.httpx.request', return_value=FakeHTTPResponse({'choices': [{'message': {'content': 'answer'}}]})) as post:
                 provider = AIProvider()
                 self.assertEqual(provider.complete('system', 'prompt', 120), 'answer')
-                self.assertEqual(post.call_args.args[0], 'https://gateway.example/v1/chat/completions')
+                self.assertEqual(post.call_args.args[:2], ('POST', 'https://gateway.example/v1/chat/completions'))
                 self.assertEqual(post.call_args.kwargs['headers']['Authorization'], 'Bearer test-key')
+                self.assertFalse(post.call_args.kwargs['trust_env'])
 
     def test_ollama_uses_local_chat_api_without_a_key(self):
         with mock.patch.dict(os.environ, {'AI_PROVIDER': 'ollama', 'AI_MODEL': 'llama3.2'}, clear=True):
-            with mock.patch('ai_provider.httpx.post', return_value=FakeHTTPResponse({'message': {'content': 'answer'}})) as post:
+            with mock.patch('ai_provider.httpx.request', return_value=FakeHTTPResponse({'message': {'content': 'answer'}})) as post:
                 provider = AIProvider()
                 self.assertTrue(provider.enabled)
                 self.assertEqual(provider.complete('system', 'prompt', 120), 'answer')
-                self.assertEqual(post.call_args.args[0], 'http://127.0.0.1:11434/api/chat')
+                self.assertEqual(post.call_args.args[:2], ('POST', 'http://127.0.0.1:11434/api/chat'))
+                self.assertFalse(post.call_args.kwargs['trust_env'])
 
     def test_explicit_deepseek_configuration_uses_submitted_url(self):
         provider = AIProvider(
             provider='deepseek', api_key='submitted-key', model='deepseek-chat',
             base_url='https://gateway.example/deepseek/', timeout=5,
         )
-        with mock.patch('ai_provider.httpx.post', return_value=FakeHTTPResponse({'choices': [{'message': {'content': 'ok'}}]})) as post:
+        with mock.patch('ai_provider.httpx.request', return_value=FakeHTTPResponse({'choices': [{'message': {'content': 'ok'}}]})) as post:
             self.assertEqual(provider.complete('system', 'prompt', 8), 'ok')
-        self.assertEqual(post.call_args.args[0], 'https://gateway.example/deepseek/chat/completions')
+        self.assertEqual(post.call_args.args[:2], ('POST', 'https://gateway.example/deepseek/chat/completions'))
         self.assertEqual(post.call_args.kwargs['timeout'], 5.0)
+        self.assertFalse(post.call_args.kwargs['trust_env'])
+        self.assertEqual(
+            post.call_args.kwargs['json']['thinking'], {'type': 'disabled'}
+        )
+        self.assertEqual(
+            post.call_args.kwargs['json']['response_format'], {'type': 'json_object'}
+        )
 
     def test_connection_validation_maps_authentication_failure(self):
         class RejectedKey(Exception):
@@ -167,6 +176,50 @@ class TestAISettingsRoute(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.get_json()['error'], 'The provider rejected the API key.')
         save.assert_not_called()
+
+
+class TestOnDemandRemediationRoute(unittest.TestCase):
+    def setUp(self):
+        app_module.app.config['TESTING'] = True
+        self.client = app_module.app.test_client()
+        self.finding = {
+            'id': 'VULN-0042', 'pattern_id': 'iam:PassRole',
+            'title': 'Pass privileged role', 'description': 'Broad PassRole.',
+            'severity': 'HIGH', 'resource_type': 'aws_iam_policy',
+            'resource_name': 'builder',
+            'policy_document': {'statement': {
+                'Effect': 'Allow', 'Action': 'iam:PassRole', 'Resource': '*',
+            }},
+            'attack_path': ['builder', 'iam:PassRole', 'admin-role'],
+            'mitre_techniques': ['T1098.003'],
+            'remediation_hint': 'Restrict role ARNs.',
+        }
+
+    def test_selected_finding_is_generated_on_demand(self):
+        generated = {
+            'vulnerability_id': 'VULN-0042', 'source': 'ai',
+            'summary': 'PassRole is overly broad.', 'actions': [{'action': 'Scope roles'}],
+            'hardened_policy': {'Version': '2012-10-17', 'Statement': [{
+                'Effect': 'Allow', 'Action': 'iam:PassRole',
+                'Resource': 'arn:aws:iam::123456789012:role/approved',
+            }]},
+        }
+        with mock.patch.object(
+            app_module.remediator, 'get_remediation', return_value=generated
+        ) as remediate:
+            response = self.client.post('/api/remediate', json={'finding': self.finding})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['generated'])
+        self.assertEqual(response.get_json()['remediation']['source'], 'ai')
+        submitted = remediate.call_args.args[0]
+        self.assertEqual(submitted['id'], 'VULN-0042')
+        self.assertEqual(submitted['attack_path'][1], 'iam:PassRole')
+
+    def test_invalid_finding_is_rejected_without_calling_ai(self):
+        with mock.patch.object(app_module.remediator, 'get_remediation') as remediate:
+            response = self.client.post('/api/remediate', json={'finding': {'id': ''}})
+        self.assertEqual(response.status_code, 400)
+        remediate.assert_not_called()
 
 
 if __name__ == '__main__':
