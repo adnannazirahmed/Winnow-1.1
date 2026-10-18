@@ -5,7 +5,7 @@ Two sources feed the same downstream pipeline:
   * `parse_gaad()`        — a live `iam:GetAccountAuthorizationDetails` response
                             (the AWS-native shape). Ported from
                             adnannazirahmed/IAM-Visualizer (backend/src/iam_parser.py).
-  * `config_to_iamdata()` — a pasted config: a Terraform plan / iam-vulnerable
+  * `config_to_iamdata()` — pasted Terraform HCL source, a Terraform plan / iam-vulnerable
                             export (`{"resources": [...]}`) or a raw policy
                             document (`{"Policy": {...}}` or a bare
                             `{"Version": ..., "Statement": [...]}`).
@@ -335,11 +335,51 @@ def _attach_policy(model: Any, policy_arn: str) -> None:
         model.attached_managed_policies.append(attachment)
 
 
+def _terraform_source_to_iamdata(config: Any, input_format: str) -> IAMData:
+    from terraform_hcl import parse_terraform_hcl, parse_terraform_json
+    supported_types = (
+        _POLICY_RESOURCE_TYPES | set(_INLINE_POLICY_RESOURCE_TYPES)
+        | set(_IDENTITY_RESOURCE_TYPES) | set(_ATTACHMENT_RESOURCE_TYPES)
+        | {"aws_iam_policy_attachment", "aws_iam_group_membership",
+           "aws_iam_user_group_membership"}
+    )
+    parser = parse_terraform_json if input_format == "terraform_json" else parse_terraform_hcl
+    imported = parser(config, supported_types)
+    result = config_to_iamdata(imported.config)
+    result.coverage.input_format = input_format
+    result.coverage.total_resources = imported.total_resources
+    result.coverage.skipped_resources = imported.skipped_resources
+    result.coverage.complete = False  # Source alone cannot prove deployed effective access.
+    result.coverage.warnings = imported.warnings + [
+        warning for warning in result.coverage.warnings
+        if warning != "The Terraform plan contains no resources"
+    ]
+    if not result.coverage.iam_resources:
+        result.coverage.warnings.append("No supported IAM identities or policies were found")
+    return result
+
+
 def config_to_iamdata(config: Any, config_type: str = "terraform") -> IAMData:
     if isinstance(config, str):
-        config = json.loads(config)
+        text = config.lstrip("\ufeff").strip()
+        if not text:
+            raise ValueError("Paste Terraform code or an IAM JSON document, or choose a .tf or .json file.")
+        try:
+            config = json.loads(text)
+        except json.JSONDecodeError as exc:
+            if text.startswith(("{", "[")):
+                raise ValueError(
+                    f"Invalid JSON at line {exc.lineno}, column {exc.colno}. "
+                    "Paste valid JSON or Terraform HCL code."
+                ) from None
+            return _terraform_source_to_iamdata(text, "terraform_hcl")
     if not isinstance(config, dict):
         raise ValueError("IAM config must be a JSON object")
+
+    if "resources" not in config and "planned_values" not in config and any(
+        key in config for key in ("resource", "terraform", "provider", "variable", "locals", "module", "data", "output")
+    ):
+        return _terraform_source_to_iamdata(config, "terraform_json")
 
     root_module = config.get("planned_values", {}).get("root_module")
     is_terraform_plan = isinstance(root_module, dict)
@@ -348,7 +388,7 @@ def config_to_iamdata(config: Any, config_type: str = "terraform") -> IAMData:
     if "resources" not in config and not is_terraform_plan:
         doc = config.get("Policy") or (config if "Statement" in config else None)
         if doc is None:
-            raise ValueError("Unsupported IAM input: expected a policy, resources, or Terraform plan")
+            raise ValueError("Unsupported IAM input: expected an IAM policy, resource export, Terraform code, configuration JSON, or plan JSON")
         name = config.get("ResourceName", "PastedPolicy")
         result = IAMData(policies=[IAMPolicy(
             policy_name=name, arn=f"inline-policy/{name}",

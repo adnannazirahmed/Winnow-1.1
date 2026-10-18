@@ -357,7 +357,9 @@
     $('stat-techniques').textContent = state.data.escalationPaths + ' paths';
     var sourceLabel = state.data.source === 'live' ? 'AWS account'
       : state.data.source === 'demo' ? 'Demo'
-      : state.data.source === 'offline-demo' ? 'Offline demo' : 'Uploaded JSON';
+      : state.data.source === 'offline-demo' ? 'Offline demo'
+      : state.data.coverage.input_format === 'terraform_hcl' ? 'Terraform code'
+      : state.data.coverage.input_format === 'terraform_json' ? 'Terraform JSON' : 'Uploaded JSON';
     $('source-eyebrow').textContent = 'Analysis · ' + sourceLabel;
   }
 
@@ -1700,21 +1702,14 @@
     }
     var text = $('config-input').value.trim();
     if (!text) {
-      state.analysisError = 'Choose a JSON file or paste a JSON document.';
-      renderSourcePanel();
-      return;
-    }
-    var parsed;
-    try { parsed = JSON.parse(text); }
-    catch (error) {
-      state.analysisError = 'The input is not valid JSON: ' + error.message;
+      state.analysisError = 'Choose a .tf or .json file, or paste Terraform code or JSON.';
       renderSourcePanel();
       return;
     }
     state.sourceTab = 'upload';
-    var name = state.uploadedFileName || 'Pasted JSON';
+    var name = state.uploadedFileName || (/^[{\[]/.test(text) ? 'Pasted JSON' : 'Pasted Terraform');
     var requestId = beginAnalysis('Analyzing ' + name + '…');
-    postJSON(API, { iam_config: parsed, config_type: 'terraform', source: 'upload', source_name: name })
+    postJSON(API, { iam_config: text, config_type: 'auto', source: 'upload', source_name: name })
       .then(function (payload) { applyResult(payload, requestId); })
       .catch(function (error) { failAnalysis(error.message || 'Analysis failed', 'upload', name, requestId); });
   }

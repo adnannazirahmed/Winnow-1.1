@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="112" viewBox="0 0 440 112" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Winnow</title>
+  <desc id="desc">Winnow IAM Remediation logo with a shield and check mark.</desc>
+  <rect width="440" height="112" rx="20" fill="#14181B"/>
+  <rect x="24" y="24" width="64" height="64" rx="16" fill="#202629" stroke="#3B4448"/>
+  <g transform="translate(36 36) scale(1.666667)" stroke="#C3C7C6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    <path d="M9 12l2 2 4-4"/>
+  </g>
+  <text x="112" y="63" fill="#F2F4F3" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="44" font-weight="500">Winnow</text>
+  <text x="114" y="86" fill="#A3ADAA" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" letter-spacing="2.2">IAM REMEDIATION</text>
+</svg>

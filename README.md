@@ -1,9 +1,15 @@
-# IAM Remediation Assistant
+<p align="center">
+  <img src="assets/winnow-logo.svg" alt="Winnow — IAM Remediation" width="440">
+</p>
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
-[![Anthropic](https://img.shields.io/badge/Claude-Haiku-CC785C?logo=anthropic&logoColor=white)](https://anthropic.com)
-[![D3.js](https://img.shields.io/badge/D3.js-7.0-F9A03C?logo=d3.js&logoColor=white)](https://d3js.org)
+<h1 align="center">IAM Remediation Assistant</h1>
+
+<p align="center">
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10+"></a>
+  <a href="https://flask.palletsprojects.com"><img src="https://img.shields.io/badge/Flask-3.0-000000?logo=flask&amp;logoColor=white" alt="Flask 3.0"></a>
+  <a href="#configuration"><img src="https://img.shields.io/badge/AI-Multiple%20Models%20Supported-CC785C" alt="Multiple AI Models Supported"></a>
+  <a href="https://d3js.org"><img src="https://img.shields.io/badge/D3.js-7.0-F9A03C?logo=d3.js&amp;logoColor=white" alt="D3.js 7.0"></a>
+</p>
 
 ---
 
@@ -11,7 +17,7 @@
 
 The **IAM Remediation Assistant** is a full-stack security tool that:
 
-1. **Ingests** IAM from an uploaded or pasted Terraform plan, `iam-vulnerable`
+1. **Ingests** IAM from uploaded or pasted Terraform code (`.tf`), Terraform plan JSON, `iam-vulnerable`
    export, raw policy JSON, or a live AWS account scan, and reports what the input
    did and did not contain.
 2. **Detects** privilege escalation from effective permissions, explicit denies,
@@ -120,7 +126,7 @@ Open http://localhost:5000 in your browser.
 ### Using Demo Data
 
 Use the source selector on **Overview** to load the bundled scenario, upload or
-paste JSON, or scan the account your credentials point at (read-only — see below).
+paste Terraform code or JSON, or scan the account your credentials point at (read-only — see below).
 
 ---
 
@@ -135,6 +141,7 @@ Winnow-1.1/
 │   ├── risk_brief.py        # grounded AI summary with explicit provider-failure state
 │   ├── organization_intelligence.py # identity inventory, anomaly rules, local snapshots
 │   ├── iam_ingest.py       # pasted config / GAAD response → IAMData
+│   ├── terraform_hcl.py    # static .tf import with explicit expression/coverage limits
 │   ├── aws_collector.py    # live scan: iam:GetAccountAuthorizationDetails + sts:GetCallerIdentity
 │   ├── iam_model.py        # Pydantic models (IAM entities + permission graph)
 │   ├── graph_builder.py    # identities/policies → nodes; trust/membership → edges; FP filter
@@ -186,7 +193,7 @@ findings are tagged `graph`, `rule`, or `ai`.
 **Coverage is part of the result.** Every analysis reports its detected input
 format, total and imported IAM resources, skipped resources, condition presence,
 and warnings for context the input cannot prove, such as permissions boundaries or
-organization/session policies. Unsupported JSON is rejected with an actionable
+organization/session policies. Invalid Terraform or JSON is rejected with an actionable
 error, and a valid input with no findings stays empty in the interface.
 
 **Remediations are proposals.** The workbench shows the retained source statement
@@ -401,6 +408,35 @@ The analyzer accepts:
 2. **Terraform Plan JSON** — output from `terraform show -json`, or `{ "resources": [...] }`
 3. **iam-vulnerable Output** — resources from the Bishop Fox tool
 4. **Raw IAM Policy JSON** — `{ "Policy": {...} }` or a bare `{ "Version": ..., "Statement": [...] }`
+5. **Terraform source (`.tf` / `.tf.json`)** — upload a file such as `main.tf` or
+   `main.tf.json`, or paste HCL code or Terraform configuration JSON directly.
+   Configuration JSON uses a top-level `"resource"` object and is distinct from
+   Terraform plan JSON; both are detected automatically.
+
+Terraform source is parsed locally without running Terraform, contacting providers,
+or applying infrastructure changes. The importer supports literal IAM policies,
+`jsonencode(...)`, JSON heredocs, variable defaults, locals, inline/trust policies,
+and references between local IAM identities and policies. For example, this can be
+pasted directly into **Upload or paste**:
+
+```hcl
+resource "aws_iam_policy" "example" {
+  name = "review-this-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "*", Resource = "*" }]
+  })
+}
+```
+
+Only supported IAM resources are analyzed; security groups, S3 buckets, EC2
+configuration, and other resource types are reported as skipped. Static imports
+always show coverage limits. `.tfvars` overrides, external files, data sources,
+module contents, `count`, `for_each`, dynamic blocks, and other computed expressions
+are not evaluated. Affected resources are skipped with a coverage warning; upload
+`terraform show -json` output when those values need to be resolved. Local IAM ARN
+references use placeholder account identifiers for graph relationships and do not
+prove deployed access.
 
 ---
 

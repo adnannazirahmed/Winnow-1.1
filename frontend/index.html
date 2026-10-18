@@ -88,10 +88,11 @@
           </div>
           <div class="source-body" id="source-upload" role="tabpanel" hidden>
             <div class="upload-fields">
-              <label class="file-label" for="config-file">Terraform plan, resource export, or policy JSON</label>
-              <input id="config-file" class="file-input" type="file" accept=".json,application/json">
-              <label class="file-label" for="config-input">Or paste JSON</label>
-              <textarea id="config-input" rows="7" spellcheck="false" placeholder="Paste the JSON document here"></textarea>
+              <label class="file-label" for="config-file">Terraform code (.tf / .tf.json), plan JSON, resource export, or policy JSON</label>
+              <input id="config-file" class="file-input" type="file" accept=".tf,.json,application/json,text/plain">
+              <label class="file-label" for="config-input">Or paste Terraform code or JSON</label>
+              <textarea id="config-input" rows="7" spellcheck="false" placeholder="Paste Terraform HCL code or an IAM JSON document here"></textarea>
+              <p class="hint">Analyzes supported IAM resources. Other resource types are listed as skipped. Terraform variables, data sources, and modules may require plan JSON for full context.</p>
             </div>
             <div class="source-actions"><span class="hint" id="upload-detail">Nothing selected</span><button class="btn btn-primary" id="analyze-upload" type="button">Analyze input</button></div>
           </div>
