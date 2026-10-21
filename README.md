@@ -94,7 +94,8 @@ that history to identify new accounts and identities without requiring AI.
 
 ### Prerequisites
 
-- Python 3.10+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with Docker Compose (recommended)
+- Python 3.10+ (only needed for the manual installation)
 - (Optional) API key for Claude, OpenAI, or DeepSeek; or a local Ollama instance, for AI-assisted detection and remediation
 - (Optional) AWS credentials with two read-only permissions, to scan a live account — see [Scan a live AWS account](#scan-a-live-aws-account)
 
@@ -104,7 +105,23 @@ that history to identify new accounts and identities without requiring AI.
 # Clone the repository
 git clone https://github.com/adnannazirahmed/Winnow-1.1.git
 cd Winnow-1.1
+```
 
+#### Docker (recommended)
+
+Start Winnow in a container with Docker Compose:
+
+```bash
+docker compose up --build -d
+```
+
+Open <http://localhost:5000>. Stop Winnow with `docker compose down`. Docker
+keeps settings and scan history in a persistent volume across restarts. See
+[Docker local installation](#docker-local-installation) for details.
+
+#### Manual Python installation
+
+```bash
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
