@@ -1,7 +1,8 @@
 """Local configuration helpers for the Winnow settings screen.
 
-Secrets are written only to backend/.env and are never included in API
-responses or log messages.  The API exposes only whether a setting exists.
+Secrets are written only to the configured local env file and are never
+included in API responses or log messages. The API exposes only whether a
+setting exists.
 """
 
 import os
@@ -13,7 +14,9 @@ from urllib.parse import urlparse
 from dotenv import dotenv_values, set_key, unset_key
 
 
-ENV_FILE = Path(__file__).with_name('.env')
+ENV_FILE = Path(
+    os.environ.get('WINNOW_SETTINGS_FILE', '') or Path(__file__).with_name('.env')
+)
 AWS_KEYS = ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
             'AWS_DEFAULT_REGION', 'AWS_PROFILE', 'AWS_ORGANIZATION_ROLE_NAME')
 AI_KEY_BY_PROVIDER = {

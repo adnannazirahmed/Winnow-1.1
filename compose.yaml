@@ -1,0 +1,17 @@
+services:
+  winnow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      ALLOW_REMOTE_SETTINGS: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - winnow-data:/data
+    restart: unless-stopped
+
+volumes:
+  winnow-data:

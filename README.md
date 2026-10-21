@@ -463,17 +463,30 @@ gunicorn -w 4 -b 0.0.0.0:5000 app:app
 Never run with `FLASK_DEBUG=1` on a reachable host: the Werkzeug debugger
 allows remote code execution.
 
-### Docker
+### Docker (local installation)
 
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY backend/requirements.txt .
-RUN pip install -r requirements.txt
-COPY backend/ .
-EXPOSE 5000
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with
+Docker Compose, then clone or download this repository. From the project root,
+run:
+
+```bash
+docker compose up --build -d
 ```
+
+Open <http://localhost:5000>. The Compose service publishes the app only on the
+local machine. To stop it, run `docker compose down`. Compose keeps credentials,
+analysis history, and organization scan history in the `winnow-data` volume,
+including across image rebuilds and container replacement.
+
+Winnow works for pasted or uploaded configuration without AWS credentials or
+an AI provider. Connect optional AWS credentials and an AI provider from
+**Settings**; the container stores them in its persistent local data volume.
+For an Ollama server running on the host, set its provider URL to
+`http://host.docker.internal:11434` in Settings.
+
+The container runs with Flask debug mode disabled and a health check at
+`/health`. The local-only port binding is important because the Settings screen
+is enabled for this Compose installation.
 
 ---
 

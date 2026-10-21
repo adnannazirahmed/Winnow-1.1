@@ -1630,7 +1630,7 @@
       state.settings = payload.settings;
       $('aws-secret-key').value = ''; $('aws-session-token').value = '';
       renderSettings();
-      setSettingsMessage('AWS account verified and saved to backend/.env.', false);
+      setSettingsMessage('AWS account verified and saved to local Winnow settings.', false);
       if (payload.analysis) {
         state.sourceTab = 'live';
         var requestId = beginAnalysis('Connected AWS account…');
@@ -1648,7 +1648,7 @@
     requestJSON('/api/settings/aws', 'DELETE').then(function (payload) {
       state.settings = payload.settings;
       $('aws-access-key').value = ''; $('aws-secret-key').value = ''; $('aws-session-token').value = ''; $('aws-organization-role').value = '';
-      renderSettings(); setSettingsMessage('Saved AWS credentials were removed from backend/.env.', false);
+      renderSettings(); setSettingsMessage('Saved AWS credentials were removed from local Winnow settings.', false);
     }).catch(function (error) { setSettingsMessage(error.message || 'Could not remove AWS credentials.', true); });
   }
 
@@ -1662,7 +1662,7 @@
     }).then(function (payload) {
       state.settings = payload.settings;
       $('ai-api-key').value = '';
-      renderSettings(); setSettingsMessage('AI provider verified, saved to backend/.env, and ready for the next analysis.', false);
+      renderSettings(); setSettingsMessage('AI provider verified, saved to local Winnow settings, and ready for the next analysis.', false);
     }).catch(function (error) { setSettingsMessage(error.message || 'Could not save AI provider.', true); })
       .then(function () { setButtonBusy('save-ai-settings', false, 'Verifying…', 'Verify and save'); });
   }
@@ -1672,7 +1672,7 @@
     requestJSON('/api/settings/ai', 'DELETE').then(function (payload) {
       state.settings = payload.settings;
       $('ai-api-key').value = ''; $('ai-model').value = '';
-      renderSettings(); setSettingsMessage('Saved AI provider settings were removed from backend/.env.', false);
+      renderSettings(); setSettingsMessage('Saved AI provider settings were removed from local Winnow settings.', false);
     }).catch(function (error) { setSettingsMessage(error.message || 'Could not remove AI provider.', true); });
   }
 

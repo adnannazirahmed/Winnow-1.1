@@ -20,7 +20,7 @@ from organization_intelligence import (
 )
 import settings
 
-load_dotenv()
+load_dotenv(dotenv_path=settings.ENV_FILE)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
