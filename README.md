@@ -5,6 +5,14 @@
 <h1 align="center">IAM Remediation Assistant</h1>
 
 <p align="center">
+  <a href="assets/winnow-launch.mp4" title="Watch the 22-second Winnow launch video">
+    <img src="assets/winnow-launch.jpg" alt="Watch the Winnow launch video: IAM policy analysis, escalation paths, and policy review" width="900">
+  </a>
+</p>
+
+<p align="center"><a href="assets/winnow-launch.mp4">▶ Watch the 22-second launch video</a></p>
+
+<p align="center">
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10+"></a>
   <a href="https://flask.palletsprojects.com"><img src="https://img.shields.io/badge/Flask-3.0-000000?logo=flask&amp;logoColor=white" alt="Flask 3.0"></a>
   <a href="#configuration"><img src="https://img.shields.io/badge/AI-Multiple%20Models%20Supported-CC785C" alt="Multiple AI Models Supported"></a>
