@@ -5,12 +5,10 @@
 <h1 align="center">IAM Remediation Assistant</h1>
 
 <p align="center">
-  <a href="assets/winnow-launch.mp4" title="Watch the 22-second Winnow launch video">
-    <img src="assets/winnow-launch.jpg" alt="Watch the Winnow launch video: IAM policy analysis, escalation paths, and policy review" width="900">
-  </a>
+  <img src="assets/winnow-launch.gif" alt="Animated Winnow preview: IAM policy analysis, escalation paths, and policy review" width="900">
 </p>
 
-<p align="center"><a href="assets/winnow-launch.mp4">▶ Watch the 22-second launch video</a></p>
+<p align="center">22-second animated preview · <a href="https://raw.githubusercontent.com/adnannazirahmed/Winnow-1.1/main/assets/winnow-launch.mp4">Download the MP4 with audio</a></p>
 
 <p align="center">
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10+"></a>
