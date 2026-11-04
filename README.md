@@ -115,10 +115,11 @@ cd Winnow-1.1
 
 #### Docker (recommended)
 
-Start Winnow in a container with Docker Compose:
+Build Winnow with Buildx (which uses BuildKit), then start it with Docker Compose:
 
 ```bash
-docker compose up --build -d
+docker buildx build --load --tag winnow:local .
+docker compose up -d
 ```
 
 Open <http://localhost:5000>. Stop Winnow with `docker compose down`. Docker
@@ -493,13 +494,19 @@ Docker Compose, then clone or download this repository. From the project root,
 run:
 
 ```bash
-docker compose up --build -d
+docker buildx build --load --tag winnow:local .
+docker compose up -d
 ```
 
 Open <http://localhost:5000>. The Compose service publishes the app only on the
 local machine. To stop it, run `docker compose down`. Compose keeps credentials,
 analysis history, and organization scan history in the `winnow-data` volume,
 including across image rebuilds and container replacement.
+
+Run the Buildx command again after changing the Dockerfile or app code, then run
+`docker compose up -d` to recreate the container from the new local image.
+Compose does not build or pull an image on its own; it requires the Buildx-built
+`winnow:local` image.
 
 Winnow works for pasted or uploaded configuration without AWS credentials or
 an AI provider. Connect optional AWS credentials and an AI provider from
