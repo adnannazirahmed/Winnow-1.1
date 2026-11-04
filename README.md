@@ -88,6 +88,9 @@ pass → remediate → visualize. With no configured AI provider the AI passes a
 and the deterministic engine still produces every finding, remediation, and graph.
 The response includes source metadata and coverage warnings so an empty result is
 shown as an empty result instead of being replaced by sample data.
+When AI is enabled, Winnow sends relevant IAM policy and finding data to the
+configured provider URL. Use the deterministic engine without an AI provider
+when that data must remain on the local machine.
 
 `/api/organization/scan` optionally discovers AWS Organizations accounts, assumes
 one configured read-only role in member accounts, collects IAM and credential
@@ -122,8 +125,10 @@ docker buildx build --load --tag winnow:local .
 docker compose up -d
 ```
 
-Open <http://localhost:5000>. Stop Winnow with `docker compose down`. Docker
-keeps settings and scan history in a persistent volume across restarts. See
+Open <http://localhost:5000>. Docker will request a browser login. Use `winnow`
+as the username and read the generated password with
+`docker compose exec winnow cat /data/access_token`. Stop Winnow with
+`docker compose down`. Docker keeps settings and scan history in a persistent volume across restarts. See
 [Docker local installation](#docker-local-installation) for details.
 
 #### Manual Python installation
@@ -304,6 +309,8 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
 PORT=5000
 HOST=127.0.0.1          # use 0.0.0.0 only in containers
 FLASK_DEBUG=0           # never set to 1 on a public host (RCE via debugger)
+# WINNOW_ACCESS_TOKEN=... # optional; use at least 32 random characters
+# WINNOW_PUBLIC_ORIGIN=https://winnow.example.com # when behind an HTTPS proxy
 
 # AI cost/latency controls
 MAX_AI_REMEDIATIONS=5           # max uncached AI calls per analysis
@@ -313,9 +320,6 @@ AI_VALIDATION_TIMEOUT_SECONDS=15
 
 # Limits
 MAX_CONFIG_BYTES=1048576        # max request body (1 MB)
-
-# Only if the frontend is served from a different origin
-# CORS_ORIGINS=https://dashboard.example.com
 
 # AWS Configuration (optional - for iam-vulnerable integration)
 AWS_ACCESS_KEY_ID=...
@@ -469,8 +473,8 @@ prove deployed access.
 ### AWS
 
 The frontend calls the API at a same-origin `/api` path, so Flask serves both
-the UI and the API from one origin. (Splitting the frontend onto S3 would
-require setting `CORS_ORIGINS` and making the API base URL configurable.)
+the UI and the API from one origin. A split-origin deployment would require
+an explicit cross-origin authentication and request policy.
 
 ```bash
 # Backend on EC2
@@ -498,8 +502,10 @@ docker buildx build --load --tag winnow:local .
 docker compose up -d
 ```
 
-Open <http://localhost:5000>. The Compose service publishes the app only on the
-local machine. To stop it, run `docker compose down`. Compose keeps credentials,
+Open <http://localhost:5000>. Sign in to the browser prompt with username
+`winnow` and the password from `docker compose exec winnow cat /data/access_token`.
+The generated token persists in the private Docker volume. The Compose service
+publishes the app only on the local machine. To stop it, run `docker compose down`. Compose keeps credentials,
 analysis history, and organization scan history in the `winnow-data` volume,
 including across image rebuilds and container replacement.
 
@@ -515,8 +521,11 @@ For an Ollama server running on the host, set its provider URL to
 `http://host.docker.internal:11434` in Settings.
 
 The container runs with Flask debug mode disabled and a health check at
-`/health`. The local-only port binding is important because the Settings screen
-is enabled for this Compose installation.
+`/health`. All other routes require authentication in Docker. If you expose
+Winnow beyond localhost, put it behind HTTPS and set `WINNOW_PUBLIC_ORIGIN` to
+the exact browser origin so write requests pass the origin check. The proxy
+must pass the HTTPS scheme to Gunicorn from a trusted proxy address; plain
+HTTP requests to a remote hostname are rejected.
 
 ---
 

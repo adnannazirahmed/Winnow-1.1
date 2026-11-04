@@ -370,7 +370,7 @@
         <div class="settings-intro">
           <span class="eyebrow">Local connections</span>
           <h2>Connect AWS and your AI provider</h2>
-          <p>Credentials are saved in Winnow's local settings storage. Winnow never displays saved secrets. Removing a connection deletes its saved values.</p>
+          <p>Credentials are saved in Winnow's local settings storage. Winnow never displays saved secrets. Removing a connection deletes its saved values. When AI is enabled, policy and finding data is sent to the provider URL you configure.</p>
         </div>
         <div class="settings-grid">
           <form class="panel settings-card" id="aws-settings-form">
@@ -424,10 +424,7 @@
   </div>
 </div>
 
-<!-- three.js is served from jsdelivr, not unpkg: the backend CSP in app.py
-     allowlists cdn.jsdelivr.net but not unpkg.com, so an unpkg tag would be
-     blocked and both 3D scenes would silently fail to mount. -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="three.min.js"></script>
 <script src="scenes.js"></script>
 <script src="script.js"></script>
 </body>

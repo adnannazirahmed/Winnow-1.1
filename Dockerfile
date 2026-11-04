@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=5000 \
     FLASK_DEBUG=0 \
     WINNOW_SETTINGS_FILE=/data/settings.env \
+    WINNOW_ACCESS_TOKEN_FILE=/data/access_token \
     WINNOW_ANALYSIS_DB=/data/winnow_analysis.db \
     WINNOW_INVENTORY_DB=/data/winnow_inventory.db
 
@@ -21,7 +22,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
 COPY backend/ /app/backend/
 COPY frontend/ /app/frontend/
 
-RUN mkdir -p /data && chown winnow:winnow /data
+RUN mkdir -p /data && chown winnow:winnow /data && chmod 0700 /data
 WORKDIR /app/backend
 USER 10001:10001
 

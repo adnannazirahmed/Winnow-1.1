@@ -1,7 +1,12 @@
 import os
 import logging
+import hmac
+import secrets
+import time
+import re
+from pathlib import Path
+from urllib.parse import urlsplit
 from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
 from dotenv import load_dotenv
 
 from iam_analyzer import IAMAnalyzer
@@ -34,11 +39,7 @@ MAX_CONFIG_BYTES = int(os.environ.get('MAX_CONFIG_BYTES', str(1024 * 1024)))  # 
 app = Flask(__name__, static_folder=FRONTEND_DIR)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONFIG_BYTES
 
-# CORS: same-origin by default. Set CORS_ORIGINS to a comma-separated list
-# only if the frontend is served from a different origin.
-cors_origins = os.environ.get('CORS_ORIGINS')
-if cors_origins:
-    CORS(app, resources={r"/api/*": {"origins": [o.strip() for o in cors_origins.split(',')]}})
+ACCESS_TOKEN_FILE = Path(os.environ.get('WINNOW_ACCESS_TOKEN_FILE') or Path(__file__).with_name('.access_token'))
 
 analyzer = IAMAnalyzer()
 ai_detector = AIDetector()
@@ -59,17 +60,73 @@ def _refresh_ai_components():
     risk_brief_generator = RiskBriefGenerator()
 
 
-def _settings_write_allowed():
-    """Secrets may be entered through the UI only from this machine by default.
-    An operator deploying the app remotely can opt in deliberately."""
-    if os.environ.get('ALLOW_REMOTE_SETTINGS') == '1':
-        return True
-    return request.remote_addr in ('127.0.0.1', '::1', None)
+def _access_token():
+    """Share one strong token across workers and restarts without logging it."""
+    configured = os.environ.get('WINNOW_ACCESS_TOKEN', '')
+    if configured:
+        if len(configured) < 32:
+            raise RuntimeError('WINNOW_ACCESS_TOKEN must be at least 32 characters')
+        return configured
+    ACCESS_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if ACCESS_TOKEN_FILE.is_symlink():
+        raise RuntimeError('Winnow access token file must not be a symlink')
+    try:
+        fd = os.open(str(ACCESS_TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        with os.fdopen(fd, 'w', encoding='ascii') as output:
+            output.write(secrets.token_urlsafe(48) + '\n')
+    if ACCESS_TOKEN_FILE.is_symlink():
+        raise RuntimeError('Winnow access token file must not be a symlink')
+    if os.name != 'nt':
+        ACCESS_TOKEN_FILE.chmod(0o600)
+    for _ in range(20):
+        token = ACCESS_TOKEN_FILE.read_text(encoding='ascii').strip()
+        if token:
+            return token
+        time.sleep(0.05)
+    raise RuntimeError('Winnow access token could not be initialized')
 
 
-def _settings_write_guard():
-    if not _settings_write_allowed():
-        return jsonify({'error': 'Settings changes are available only from the server machine.'}), 403
+def _request_hostname():
+    try:
+        return (urlsplit('//' + request.host).hostname or '').lower()
+    except ValueError:
+        return ''
+
+
+def _local_request():
+    return (os.environ.get('HOST', '127.0.0.1') in ('127.0.0.1', 'localhost', '::1')
+            and request.remote_addr in ('127.0.0.1', '::1')
+            and _request_hostname() in ('localhost', '127.0.0.1', '::1'))
+
+
+@app.before_request
+def protect_local_data():
+    if request.path == '/health':
+        return None
+    if not _local_request():
+        hostname = _request_hostname()
+        if (hostname not in ('localhost', '127.0.0.1', '::1')
+                and not request.is_secure):
+            return jsonify({'error': 'HTTPS is required for remote access.'}), 403
+        auth = request.authorization
+        supplied = auth.password if auth and auth.type == 'basic' and auth.username == 'winnow' else ''
+        expected = _access_token()
+        if not supplied or not hmac.compare_digest(supplied, expected):
+            response = jsonify({'error': 'Authentication required.'})
+            response.status_code = 401
+            response.headers['WWW-Authenticate'] = 'Basic realm="Winnow"'
+            return response
+    if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        origin = request.headers.get('Origin')
+        if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+            return jsonify({'error': 'Cross-site requests are not allowed.'}), 403
+        if origin:
+            expected = os.environ.get('WINNOW_PUBLIC_ORIGIN') or request.host_url.rstrip('/')
+            if origin != expected:
+                return jsonify({'error': 'Request origin is not allowed.'}), 403
     return None
 
 
@@ -79,9 +136,20 @@ def _remember_analysis(payload):
         return payload
     try:
         payload['history'] = analysis_store.save(payload)
-    except Exception:
-        logger.exception('Could not save completed analysis history')
+    except Exception as exc:
+        logger.error('Could not save completed analysis history: %s', type(exc).__name__)
     return payload
+
+
+def _safe_input_error(error):
+    """Retain parser location without echoing source text or field values."""
+    message = str(error)
+    match = re.match(r'^Invalid (Terraform syntax|JSON) at line (\d+), column (\d+)', message)
+    if match:
+        return f'Invalid {match.group(1)} at line {match.group(2)}, column {match.group(3)}.'
+    if message.startswith('Invalid Terraform configuration JSON:'):
+        return 'Invalid Terraform configuration JSON: blocks must contain objects.'
+    return 'Invalid IAM configuration format'
 
 
 @app.after_request
@@ -91,10 +159,12 @@ def set_security_headers(response):
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'DENY')
     response.headers.setdefault('Referrer-Policy', 'no-referrer')
+    if request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store'
     response.headers.setdefault(
         'Content-Security-Policy',
         "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net https://d3js.org https://cdnjs.cloudflare.com; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data:; "
@@ -252,10 +322,10 @@ def analyze():
         result = _run_pipeline(iam_data, source=source, source_name=source_name)
         return jsonify(_remember_analysis(result))
     except ValueError as e:
-        logger.warning(f"Invalid analyze request: {e}")
-        return jsonify({'error': str(e)[:240] or 'Invalid IAM configuration format'}), 400
-    except Exception:
-        logger.exception("Analysis error")
+        logger.warning('Invalid analyze request: %s', type(e).__name__)
+        return jsonify({'error': _safe_input_error(e)}), 400
+    except Exception as e:
+        logger.error('Analysis error: %s', type(e).__name__)
         return jsonify({'error': 'Internal server error during analysis'}), 500
 
 
@@ -280,15 +350,15 @@ def scan_account():
         return jsonify({'error': 'The AWS credentials lack iam:GetAccountAuthorizationDetails.'}), 403
     except aws_collector.Throttled:
         return jsonify({'error': 'AWS throttled the request after retries. Try again shortly.'}), 429
-    except Exception:
-        logger.exception("AWS scan error")
+    except Exception as exc:
+        logger.error('AWS scan error: %s', type(exc).__name__)
         return jsonify({'error': 'AWS scan failed. Check the server logs.'}), 502
 
     try:
         iam_data = iam_ingest.parse_gaad(raw, account_id)
         return jsonify(_remember_analysis(_run_pipeline(iam_data, source='live')))
-    except Exception:
-        logger.exception("Analysis error after AWS scan")
+    except Exception as exc:
+        logger.error('Analysis error after AWS scan: %s', type(exc).__name__)
         return jsonify({'error': 'Internal server error during analysis'}), 500
 
 
@@ -297,8 +367,8 @@ def generate_dummy():
     try:
         dummy_config = analyzer.generate_dummy_data()
         return jsonify({'iam_config': dummy_config})
-    except Exception:
-        logger.exception("Dummy generation error")
+    except Exception as exc:
+        logger.error('Dummy generation error: %s', type(exc).__name__)
         return jsonify({'error': 'Internal server error'}), 500
 
 
@@ -307,13 +377,10 @@ def analysis_history():
     """List recent local analyses or remove the complete local history."""
     try:
         if request.method == 'DELETE':
-            guard = _settings_write_guard()
-            if guard:
-                return guard
             return jsonify({'deleted': analysis_store.clear(), 'runs': []})
         return jsonify({'runs': analysis_store.list()})
-    except Exception:
-        logger.exception('Could not access analysis history')
+    except Exception as exc:
+        logger.error('Could not access analysis history: %s', type(exc).__name__)
         return jsonify({'error': 'Saved analysis history is unavailable.'}), 500
 
 
@@ -322,8 +389,8 @@ def latest_analysis():
     try:
         analysis = analysis_store.latest()
         return jsonify({'available': bool(analysis), 'analysis': analysis})
-    except Exception:
-        logger.exception('Could not restore the latest analysis')
+    except Exception as exc:
+        logger.error('Could not restore the latest analysis: %s', type(exc).__name__)
         return jsonify({'error': 'The latest saved analysis is unavailable.'}), 500
 
 
@@ -331,9 +398,6 @@ def latest_analysis():
 def saved_analysis(run_id):
     try:
         if request.method == 'DELETE':
-            guard = _settings_write_guard()
-            if guard:
-                return guard
             deleted = analysis_store.delete(run_id)
             if not deleted:
                 return jsonify({'error': 'Saved analysis was not found.'}), 404
@@ -342,8 +406,8 @@ def saved_analysis(run_id):
         if not analysis:
             return jsonify({'error': 'Saved analysis was not found.'}), 404
         return jsonify({'analysis': analysis})
-    except Exception:
-        logger.exception('Could not access saved analysis %s', run_id)
+    except Exception as exc:
+        logger.error('Could not access saved analysis %s: %s', run_id, type(exc).__name__)
         return jsonify({'error': 'Saved analysis is unavailable.'}), 500
 
 
@@ -354,9 +418,6 @@ def generate_remediation():
     Batch analysis is intentionally capped to control latency and cost. This
     route lets the policy workbench request any remaining finding on demand.
     """
-    guard = _settings_write_guard()
-    if guard:
-        return guard
     data = request.get_json(silent=True)
     finding = data.get('finding') if isinstance(data, dict) else None
     if not isinstance(finding, dict):
@@ -406,8 +467,8 @@ def generate_remediation():
             )
         except (TypeError, ValueError):
             history_saved = False
-        except Exception:
-            logger.exception('Could not update remediation in saved analysis')
+        except Exception as exc:
+            logger.error('Could not update remediation in saved analysis: %s', type(exc).__name__)
     return jsonify({
         'remediation': remediation,
         'generated': remediation.get('source') == 'ai',
@@ -419,8 +480,8 @@ def generate_remediation():
 def latest_organization_inventory():
     try:
         latest = inventory_store.latest_any()
-    except Exception:
-        logger.exception('Could not read the saved organization inventory')
+    except Exception as exc:
+        logger.error('Could not read the saved organization inventory: %s', type(exc).__name__)
         return jsonify({'available': False, 'error': 'Saved organization inventory is unavailable.'}), 500
     return jsonify({'available': bool(latest), 'inventory': latest})
 
@@ -448,8 +509,8 @@ def scan_organization():
         return jsonify({'error': 'AWS throttled the organization scan. Try again shortly.'}), 429
     except aws_collector.CollectorError:
         return jsonify({'error': 'AWS organization discovery failed for the connected credentials.'}), 502
-    except Exception:
-        logger.exception('AWS organization collection failed')
+    except Exception as exc:
+        logger.error('AWS organization collection failed: %s', type(exc).__name__)
         return jsonify({'error': 'AWS organization collection failed. Check the server logs.'}), 502
 
     scanned_accounts = []
@@ -484,8 +545,8 @@ def scan_organization():
     )
     try:
         inventory_store.save(scope_key, inventory)
-    except Exception:
-        logger.exception('Could not save organization inventory snapshot')
+    except Exception as exc:
+        logger.error('Could not save organization inventory snapshot: %s', type(exc).__name__)
         inventory['coverage']['warnings'].append(
             'This scan succeeded but its local comparison snapshot could not be saved.'
         )
@@ -504,9 +565,6 @@ def get_settings():
 
 @app.route('/api/settings/aws', methods=['POST', 'DELETE'])
 def aws_settings():
-    guard = _settings_write_guard()
-    if guard:
-        return guard
     if request.method == 'DELETE':
         settings.remove_aws_credentials()
         return jsonify({'settings': settings.public_settings()})
@@ -539,9 +597,6 @@ def aws_settings():
 
 @app.route('/api/settings/ai', methods=['POST', 'DELETE'])
 def ai_settings():
-    guard = _settings_write_guard()
-    if guard:
-        return guard
     if request.method == 'DELETE':
         settings.remove_ai_configuration()
         _refresh_ai_components()

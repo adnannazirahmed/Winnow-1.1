@@ -12,6 +12,7 @@ server.log
 .env
 .env.*
 backend/.env
+backend/.access_token
 backend/tests/
 backend/winnow_*.db*
 pytest-cache-files-*/

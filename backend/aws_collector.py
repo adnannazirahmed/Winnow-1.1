@@ -164,7 +164,7 @@ def collect_account_authorization_details() -> Tuple[Dict[str, Any], str]:
             raise NoCredentials(code)
         if code in _THROTTLE_CODES:
             raise Throttled(code)
-        logger.error("get_account_authorization_details failed: %s", code or e)
+        logger.error('get_account_authorization_details failed: %s', code or type(e).__name__)
         raise CollectorError(code or "AWS error")
     except BotoCoreError as e:
         raise CollectorError(str(e))
@@ -176,7 +176,7 @@ def collect_account_authorization_details() -> Tuple[Dict[str, Any], str]:
     except (NoCredentialsError, ProfileNotFound):
         raise NoCredentials("no AWS credentials for sts:GetCallerIdentity")
     except Exception as e:  # non-fatal — the account id is cosmetic
-        logger.warning("Could not resolve AWS account id: %s", e)
+        logger.warning('Could not resolve AWS account id: %s', type(e).__name__)
 
     return raw, account_id
 

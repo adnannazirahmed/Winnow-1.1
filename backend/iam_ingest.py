@@ -40,8 +40,7 @@ class IAMParser:
                 if policy:
                     iam_data.policies.append(policy)
             except Exception as e:
-                logger.warning("Failed to parse policy %s: %s",
-                               pol_data.get("PolicyName", "unknown"), e)
+                logger.warning('Failed to parse policy: %s', type(e).__name__)
 
         for user_data in raw_data.get("UserDetailList", []):
             try:
@@ -49,8 +48,7 @@ class IAMParser:
                 if user:
                     iam_data.users.append(user)
             except Exception as e:
-                logger.warning("Failed to parse user %s: %s",
-                               user_data.get("UserName", "unknown"), e)
+                logger.warning('Failed to parse user: %s', type(e).__name__)
 
         for role_data in raw_data.get("RoleDetailList", []):
             try:
@@ -58,8 +56,7 @@ class IAMParser:
                 if role:
                     iam_data.roles.append(role)
             except Exception as e:
-                logger.warning("Failed to parse role %s: %s",
-                               role_data.get("RoleName", "unknown"), e)
+                logger.warning('Failed to parse role: %s', type(e).__name__)
 
         for group_data in raw_data.get("GroupDetailList", []):
             try:
@@ -67,8 +64,7 @@ class IAMParser:
                 if group:
                     iam_data.groups.append(group)
             except Exception as e:
-                logger.warning("Failed to parse group %s: %s",
-                               group_data.get("GroupName", "unknown"), e)
+                logger.warning('Failed to parse group: %s', type(e).__name__)
 
         return iam_data
 

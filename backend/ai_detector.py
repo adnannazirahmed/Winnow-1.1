@@ -80,7 +80,7 @@ Return an empty array [] if there are no additional findings."""
             try:
                 self.client = anthropic.Anthropic(api_key=self.api_key)
             except Exception as e:
-                logger.warning(f"Failed to init Anthropic client: {e}")
+                logger.warning('Failed to init Anthropic client: %s', type(e).__name__)
                 self.client = None
         elif self.provider_name != 'anthropic':
             self.provider_client = AIProvider()
@@ -116,7 +116,7 @@ Return an empty array [] if there are no additional findings."""
             items = self._parse_json(raw)
             return self._normalize(items, iam_config)
         except Exception as e:
-            logger.error(f"AI detection failed: {e}")
+            logger.error('AI detection failed: %s', type(e).__name__)
             return []
 
     def _summarize_known(self, static_findings: List[Dict]) -> str:

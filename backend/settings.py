@@ -17,6 +17,10 @@ from dotenv import dotenv_values, set_key, unset_key
 ENV_FILE = Path(
     os.environ.get('WINNOW_SETTINGS_FILE', '') or Path(__file__).with_name('.env')
 )
+if ENV_FILE.is_symlink():
+    raise RuntimeError('Settings file must not be a symlink')
+if ENV_FILE.exists() and os.name != 'nt':
+    ENV_FILE.chmod(0o600)
 AWS_KEYS = ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
             'AWS_DEFAULT_REGION', 'AWS_PROFILE', 'AWS_ORGANIZATION_ROLE_NAME')
 AI_KEY_BY_PROVIDER = {
@@ -54,7 +58,11 @@ def _env_file_values() -> Dict[str, str]:
 
 
 def _save(updates: Dict[str, str], removals: Iterable[str] = ()) -> None:
+    if ENV_FILE.is_symlink():
+        raise ValueError('Settings file must not be a symlink')
     ENV_FILE.touch(exist_ok=True)
+    if os.name != 'nt':
+        ENV_FILE.chmod(0o600)
     file_values = _env_file_values()
     for key in removals:
         if key in file_values:
@@ -63,6 +71,8 @@ def _save(updates: Dict[str, str], removals: Iterable[str] = ()) -> None:
     for key, value in updates.items():
         set_key(str(ENV_FILE), key, value, quote_mode='auto')
         os.environ[key] = value
+    if os.name != 'nt':
+        ENV_FILE.chmod(0o600)
 
 
 def _clean(value, field: str, maximum: int = 4096) -> str:
@@ -128,8 +138,13 @@ def normalise_ai_configuration(data: Dict[str, object]) -> Dict[str, str]:
     if provider != 'ollama' and not api_key:
         raise ValueError('Enter an API key for the selected provider')
     parsed_url = urlparse(base_url)
-    if parsed_url.scheme not in ('http', 'https') or not parsed_url.netloc:
+    if parsed_url.scheme not in ('http', 'https') or not parsed_url.hostname:
         raise ValueError('Provider URL must be a complete http:// or https:// URL')
+    if parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
+        raise ValueError('Provider URL must not contain credentials, a query, or a fragment')
+    if parsed_url.scheme == 'http' and (provider != 'ollama' or parsed_url.hostname not in
+            ('localhost', '127.0.0.1', '::1', 'host.docker.internal')):
+        raise ValueError('Provider URL must use HTTPS; local Ollama may use HTTP')
     return {
         'provider': provider,
         'model': model,

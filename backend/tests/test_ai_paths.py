@@ -61,7 +61,7 @@ class TestRemediatorAIPath(unittest.TestCase):
         ]
 
     def _remediator(self, replies, max_calls=5):
-        with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key',
+        with mock.patch.dict(os.environ, {'AI_PROVIDER': 'anthropic', 'ANTHROPIC_API_KEY': 'test-key',
                                           'MAX_AI_REMEDIATIONS': str(max_calls)}):
             with mock.patch('remediator.ANTHROPIC_AVAILABLE', True), \
                  mock.patch('remediator.anthropic') as anth:
@@ -202,7 +202,7 @@ class TestRemediatorAIPath(unittest.TestCase):
         )
 
     def test_timeout_is_configured(self):
-        with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'k', 'ANTHROPIC_TIMEOUT_SECONDS': '12'}):
+        with mock.patch.dict(os.environ, {'AI_PROVIDER': 'anthropic', 'ANTHROPIC_API_KEY': 'k', 'ANTHROPIC_TIMEOUT_SECONDS': '12'}):
             with mock.patch('remediator.ANTHROPIC_AVAILABLE', True), \
                  mock.patch('remediator.anthropic') as anth:
                 Remediator()
@@ -213,7 +213,7 @@ class TestRemediatorAIPath(unittest.TestCase):
 
 class TestAIDetector(unittest.TestCase):
     def _detector(self, replies):
-        with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}):
+        with mock.patch.dict(os.environ, {'AI_PROVIDER': 'anthropic', 'ANTHROPIC_API_KEY': 'test-key'}):
             with mock.patch('ai_detector.ANTHROPIC_AVAILABLE', True), \
                  mock.patch('ai_detector.anthropic') as anth:
                 anth.Anthropic.return_value = FakeClient(replies)

@@ -88,6 +88,18 @@ class TestSettings(unittest.TestCase):
             settings.normalise_ai_configuration({
                 'provider': 'deepseek', 'api_key': 'key', 'base_url': 'api.deepseek.com',
             })
+        with self.assertRaisesRegex(ValueError, 'HTTPS'):
+            settings.normalise_ai_configuration({
+                'provider': 'openai', 'api_key': 'key', 'base_url': 'http://api.example.com',
+            })
+        with self.assertRaisesRegex(ValueError, 'credentials'):
+            settings.normalise_ai_configuration({
+                'provider': 'openai', 'api_key': 'key', 'base_url': 'https://user:pass@api.example.com',
+            })
+        local = settings.normalise_ai_configuration({
+            'provider': 'ollama', 'base_url': 'http://127.0.0.1:11434',
+        })
+        self.assertEqual(local['base_url'], 'http://127.0.0.1:11434')
 
 
 class TestCompatibleAIProviders(unittest.TestCase):

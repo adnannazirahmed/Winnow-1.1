@@ -26,6 +26,8 @@ class AnalysisHistoryStore:
     def __init__(self, path: Optional[Path] = None, limit: Optional[int] = None):
         configured = os.environ.get('WINNOW_ANALYSIS_DB', '').strip()
         self.path = Path(path or configured or DEFAULT_DB_PATH)
+        if self.path.exists() and os.name != 'nt':
+            self.path.chmod(0o600)
         if limit is None:
             try:
                 limit = int(os.environ.get('WINNOW_ANALYSIS_HISTORY_LIMIT', '30'))
@@ -36,6 +38,8 @@ class AnalysisHistoryStore:
     def _connect(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(str(self.path), timeout=5)
+        if os.name != 'nt':
+            self.path.chmod(0o600)
         connection.row_factory = sqlite3.Row
         connection.execute(
             'CREATE TABLE IF NOT EXISTS analysis_runs ('

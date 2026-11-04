@@ -188,7 +188,7 @@ return a complete, placeholder-free, fail-closed hardened_policy."""
                     max_retries=1,
                 )
             except Exception as e:
-                logger.warning(f"Failed to init Anthropic client: {e}")
+                logger.warning('Failed to init Anthropic client: %s', type(e).__name__)
                 self.client = None
         elif self.provider_name != 'anthropic':
             self.provider_client = AIProvider()

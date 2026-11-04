@@ -15,6 +15,7 @@ build/
 # Secrets / environment
 .env
 backend/.env
+backend/.access_token
 .env.local
 .env.*.local
 
