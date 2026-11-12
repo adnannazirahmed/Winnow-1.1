@@ -33,6 +33,7 @@
         <span class="kbd">⌘K</span>
       </button>
       <div class="status-row">
+        <a href="../account.html" id="hosted-account-link" hidden>Account</a>
         <span class="status-dot"></span>
         <span class="status-text" id="status-text" role="status" aria-live="polite">Rule engine · ready</span>
         <button class="icon-btn" id="theme-toggle" title="Toggle theme"></button>
@@ -53,7 +54,7 @@
   <main class="main">
     <header class="topbar">
       <div>
-        <div class="eyebrow" id="source-eyebrow">Analysis · demo</div>
+        <div class="eyebrow" id="source-eyebrow">Analysis</div>
         <h1 id="view-title">Posture overview</h1>
       </div>
       <span class="spacer"></span>
@@ -426,6 +427,9 @@
 
 <script src="three.min.js"></script>
 <script src="scenes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="public-app.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

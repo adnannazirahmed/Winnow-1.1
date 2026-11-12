@@ -34,7 +34,8 @@
   /* GitHub Pages is an offline preview. Keep credentials, uploaded policy
      documents, and scan requests inside the browser instead of sending them
      to a host that does not run Winnow's backend. */
-  var STATIC_PREVIEW = /(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:';
+  var STATIC_PREVIEW = !window.WINNOW_PUBLIC_APP &&
+    (/(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
   var STATIC_PREVIEW_MESSAGE = 'Static demo mode: no AWS, AI, or uploaded data is sent from this site.';
 
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
@@ -126,7 +127,7 @@
     spin: true,
     paletteOpen: false,
     paletteIndex: 0,
-    sourceTab: 'demo',
+    sourceTab: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo',
     analysisStatus: STATIC_PREVIEW ? 'partial' : 'idle',
     analysisError: '',
     scanTime: null,
@@ -1503,7 +1504,7 @@
       visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
       risk_brief: null,
       summary: {
-        source: 'demo', source_name: 'No scan started',
+        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
         identity_count: 0, policy_count: 0, escalation_paths: 0,
         coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
         ai_status: 'enabled'

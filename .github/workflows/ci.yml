@@ -1,0 +1,58 @@
+name: Verify Winnow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r backend/requirements.txt pytest
+      - run: python -m pytest backend/tests -q
+      - run: |
+          node --check website/auth.js
+          node --check website/theme.js
+          node --check frontend/public-app.js
+          node --check frontend/script.js
+
+  pages:
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.WINNOW_API_ORIGIN != '' }}
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build public site
+        env:
+          WINNOW_API_ORIGIN: ${{ vars.WINNOW_API_ORIGIN }}
+          SUPABASE_URL: https://vfdfldezujsncttfrgvg.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_9T1XHZTDdg9Ia8tcHVAy2g_d8zjxTdP
+        run: python scripts/build_public_site.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site-dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -123,6 +123,16 @@ a:hover { color: var(--n-ink); }
 .kbd { font-family: var(--mono); font-size: 10px; border: 1px solid var(--n-line); border-radius: 4px; padding: 1px 4px; }
 
 .status-row { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+#hosted-account-link { color: var(--text-secondary, #aebdb4); font-size: 12px; text-decoration: none; }
+#hosted-account-link[hidden],
+body.hosted [data-source-tab="demo"],
+body.hosted [data-source-tab="live"],
+body.hosted [data-load-demo],
+body.hosted [data-scan-aws],
+body.hosted [data-goto="settings"],
+body.hosted #reanalyze,
+body.hosted #scan-aws,
+body.hosted #scan-organization { display: none !important; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--n-low); animation: n-breathe 3s infinite ease-in-out; }
 .status-text { font-size: 11px; color: var(--n-mute); flex: 1; }
 .icon-btn {

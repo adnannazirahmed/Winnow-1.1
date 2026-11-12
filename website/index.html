@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Winnow — Find the path before they do.</title>
+  <meta name="description" content="Winnow maps privilege escalation across AWS IAM, keeps the evidence behind every path, and turns the fix into a reviewable policy diff.">
+  <meta name="theme-color" content="#0f1312">
+  <meta property="og:title" content="Winnow — Find the path before they do.">
+  <meta property="og:description" content="IAM remediation with the evidence attached.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/winnow-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="home">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Winnow home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="brand-word">Winnow</span>
+          <span class="brand-sub">IAM remediation</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="#product">Product</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#coverage">Coverage</a>
+        <a href="#audience">Who it's for</a>
+        <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn-ghost" href="signup.html" data-app-link>Open Winnow</a>
+        <a class="btn btn-secondary" href="signup.html" data-auth-link>Sign in</a>
+      </div>
+
+      <details class="mobile-menu">
+        <summary class="menu-toggle" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16"/>
+          </svg>
+        </summary>
+        <nav class="mobile-nav" aria-label="Mobile">
+          <a href="#product">Product</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#coverage">Coverage</a>
+          <a href="#audience">Who it's for</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="btn btn-primary" href="signup.html" data-auth-link>Sign in</a>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="product">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>IAM remediation</span>
+          <h1>
+            <span class="line">Find the path</span>
+            <span class="line"><em>before</em> they do.</span>
+          </h1>
+          <p class="hero-lead">Winnow maps privilege escalation across your AWS IAM, keeps the evidence behind every path, and turns the fix into a reviewable policy diff.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="signup.html?mode=signup">
+              Create account
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6"/>
+              </svg>
+            </a>
+            <a class="btn btn-secondary" href="signup.html" data-app-link>Open the Winnow app</a>
+          </div>
+          <div class="hero-trust" role="group" aria-label="Product foundations">
+            <span class="trust-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Read-only AWS scan
+            </span>
+            <span class="trust-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Deterministic engine
+            </span>
+            <span class="trust-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              No AI key required
+            </span>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="product-window" role="group" aria-label="Sample Winnow analysis showing an illustrative critical escalation path">
+            <div class="product-top">
+              <span>Winnow / Analysis</span>
+              <strong>Posture overview</strong>
+              <span class="product-badge">Product preview</span>
+            </div>
+            <div class="product-body">
+              <div class="product-heading">
+                <div>
+                  <div class="product-title">Posture overview</div>
+                  <div class="product-meta">Bundled metrics · sample path</div>
+                </div>
+                <div class="product-meta">Risk 100/100</div>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric"><strong>21</strong><span>Findings</span></div>
+                <div class="metric"><strong>5</strong><span>Identities</span></div>
+                <div class="metric"><strong>6</strong><span>Techniques</span></div>
+              </div>
+
+              <div class="risk-strip">
+                <span><span class="risk-label">Critical paths</span> 12 found</span>
+                <strong>risk 100/100</strong>
+              </div>
+
+              <div class="path-chain">
+                <div class="path-node is-hot">
+                  <span class="node-label">Identity</span>
+                  <span class="node-name">deploy-bot</span>
+                  <span class="node-sub">IAM user</span>
+                </div>
+                <div class="path-node is-hot">
+                  <span class="node-label">Policy</span>
+                  <span class="node-name">VulnerableAdminPolicy</span>
+                  <span class="node-sub">allow *</span>
+                </div>
+                <div class="path-node is-hot">
+                  <span class="node-label">Role</span>
+                  <span class="node-name">AdminRole</span>
+                  <span class="node-sub">assumable</span>
+                </div>
+                <div class="path-node is-hot">
+                  <span class="node-label">Access</span>
+                  <span class="node-name">AdministratorAccess</span>
+                  <span class="node-sub">admin</span>
+                </div>
+              </div>
+
+              <div class="evidence">
+                <div>
+                  <span class="evidence-label">Matched statement</span>
+                  <span class="evidence-code">Action: <span>"*"</span> · Resource: <span>"*"</span></span>
+                </div>
+                <span class="evidence-tag">Critical</span>
+              </div>
+
+              <div class="product-foot">
+                <span>sts:AssumeRole → iam:AttachUserPolicy</span>
+                <span>24 actions · 50h</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="proof-strip" role="group" aria-label="Winnow foundations">
+      <div class="container proof-inner">
+        <span>Built on iam-vulnerable</span>
+        <span class="proof-sep" aria-hidden="true"></span>
+        <span>Mapped to MITRE ATT&amp;CK</span>
+        <span class="proof-sep" aria-hidden="true"></span>
+        <span>Read-only AWS scan</span>
+        <span class="proof-sep" aria-hidden="true"></span>
+        <span>Reviewable remediation</span>
+      </div>
+    </div>
+
+    <section class="section" id="product-detail">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">01 / Why graph-first</span>
+            <h2>Policies don't fail in isolation. Paths do.</h2>
+          </div>
+          <p>Winnow starts with the permission graph, not a checklist. It evaluates effective access across identities, policies, groups, roles, and trust edges, then keeps the evidence that made the path possible.</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="feature-num">
+              <span>01</span>
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m12 3 9 5-9 5-9-5 9-5z"/>
+                <path d="m3 12 9 5 9-5"/>
+                <path d="m3 16 9 5 9-5"/>
+              </svg>
+            </div>
+            <h3>Effective permissions</h3>
+            <p>Allow, Deny, wildcards, NotAction, NotResource, and conditions are evaluated together, so a policy is judged by what it actually grants.</p>
+          </article>
+
+          <article class="feature">
+            <div class="feature-num">
+              <span>02</span>
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="6" cy="12" r="2.5"/>
+                <circle cx="18" cy="6" r="2.5"/>
+                <circle cx="18" cy="18" r="2.5"/>
+                <path d="m8.2 10.9 7.6-3.7M8.2 13.1l7.6 3.7"/>
+              </svg>
+            </div>
+            <h3>Trust relationships</h3>
+            <p>Assume-role edges are followed only when the source can assume the role and no explicit deny covers it.</p>
+          </article>
+
+          <article class="feature">
+            <div class="feature-num">
+              <span>03</span>
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6M8 13h8M8 17h5"/>
+              </svg>
+            </div>
+            <h3>Retained evidence</h3>
+            <p>Every finding keeps the matched statement, decision status, and the runtime context the input cannot prove.</p>
+          </article>
+        </div>
+
+        <div class="quote-band">
+          <blockquote>“Coverage is part of the result.”</blockquote>
+          <cite>Winnow design note</cite>
+        </div>
+      </div>
+    </section>
+
+    <section class="section workflow" id="workflow">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">02 / The workbench</span>
+            <h2>From an exposed identity to a reviewable fix.</h2>
+          </div>
+          <p>One pipeline, three clear moves. Start with the input you already have. Winnow reports what it saw, what it could not prove, and what to review next.</p>
+        </div>
+
+        <div class="workflow-grid">
+          <div class="workflow-steps" role="tablist" aria-label="Winnow workflow" aria-orientation="vertical">
+            <button class="workflow-step" id="tab-ingest" type="button" role="tab" aria-selected="true" aria-controls="panel-ingest" tabindex="0" data-workflow-tab="ingest">
+              <span class="step-num">01</span>
+              <span class="step-body">
+                <span class="step-title">Ingest</span>
+                <span class="step-desc">Paste Terraform, plan JSON, IAM policy JSON, or connect a read-only AWS account.</span>
+              </span>
+            </button>
+            <button class="workflow-step" id="tab-trace" type="button" role="tab" aria-selected="false" aria-controls="panel-trace" tabindex="-1" data-workflow-tab="trace">
+              <span class="step-num">02</span>
+              <span class="step-body">
+                <span class="step-title">Trace</span>
+                <span class="step-desc">Walk every hop with matched statements, conditions, and decision status.</span>
+              </span>
+            </button>
+            <button class="workflow-step" id="tab-remediate" type="button" role="tab" aria-selected="false" aria-controls="panel-remediate" tabindex="-1" data-workflow-tab="remediate">
+              <span class="step-num">03</span>
+              <span class="step-body">
+                <span class="step-title">Remediate</span>
+                <span class="step-desc">Compare Original, Proposed, and Diff views. Validate the structure. No AWS mutation.</span>
+              </span>
+            </button>
+          </div>
+
+          <div class="workbench">
+            <div class="workbench-top">
+              <span>Workbench</span>
+              <strong>Product preview</strong>
+              <span class="product-badge">Sample</span>
+            </div>
+
+            <div class="workbench-panel" id="panel-ingest" role="tabpanel" aria-labelledby="tab-ingest" data-workflow-panel="ingest">
+              <div class="code-block">
+                <div class="code-head">
+                  <span>Terraform HCL</span>
+                  <span>main.tf</span>
+                </div>
+                <div class="code-body">
+                  <pre><code>resource <span class="tok-str">"aws_iam_policy"</span> <span class="tok-str">"review_this"</span> {
+  name   = <span class="tok-str">"review-this-policy"</span>
+  policy = <span class="tok-key">jsonencode</span>({
+    Version = <span class="tok-str">"2012-10-17"</span>
+    Statement = [{
+      Effect   = <span class="tok-str">"Allow"</span>
+      Action   = <span class="tok-str">"*"</span>
+      Resource = <span class="tok-str">"*"</span>
+    }]
+  })
+}</code></pre>
+                </div>
+              </div>
+              <div class="status-line"><span class="status-dot" aria-hidden="true"></span>Detected Terraform HCL · coverage warnings shown after analysis</div>
+            </div>
+
+            <div class="workbench-panel" id="panel-trace" role="tabpanel" aria-labelledby="tab-trace" data-workflow-panel="trace" hidden>
+              <div class="finding-card">
+                <div class="finding-head">
+                  <div>
+                    <div class="finding-title">Privilege escalation via policy attachment</div>
+                    <div class="product-meta">VulnerableAdminPolicy</div>
+                  </div>
+                  <span class="sev sev-critical">Critical</span>
+                </div>
+                <div class="finding-path">
+                  <span>deploy-bot</span>
+                  <span class="arrow" aria-hidden="true">→</span>
+                  <span>VulnerableAdminPolicy</span>
+                  <span class="arrow" aria-hidden="true">→</span>
+                  <span>AdminRole</span>
+                  <span class="arrow" aria-hidden="true">→</span>
+                  <span>AdministratorAccess</span>
+                </div>
+                <div class="evidence-list">
+                  <div class="evidence-item"><span>Matched</span><strong>Action: "*"</strong></div>
+                  <div class="evidence-item"><span>Decision</span><strong>Allow</strong></div>
+                  <div class="evidence-item"><span>Context</span><strong>Conditions present</strong></div>
+                </div>
+              </div>
+              <div class="workbench-note"><span class="sev sev-medium">Conditional</span> Runtime context needs human review</div>
+            </div>
+
+            <div class="workbench-panel" id="panel-remediate" role="tabpanel" aria-labelledby="tab-remediate" data-workflow-panel="remediate" hidden>
+              <div class="code-block">
+                <div class="code-head">
+                  <span>Proposed policy</span>
+                  <span>Diff view</span>
+                </div>
+                <div class="diff">
+                  <div class="diff-line minus"><span class="sign" aria-hidden="true">-</span><span>Action: "*"</span></div>
+                  <div class="diff-line minus"><span class="sign" aria-hidden="true">-</span><span>Resource: "*"</span></div>
+                  <div class="diff-line plus"><span class="sign" aria-hidden="true">+</span><span>Action: ["iam:GetAccountAuthorizationDetails"]</span></div>
+                  <div class="diff-line plus"><span class="sign" aria-hidden="true">+</span><span>Resource: "arn:aws:iam::*:role/audit"</span></div>
+                </div>
+              </div>
+              <div class="workbench-note"><span class="status-dot" aria-hidden="true"></span>Structural validation passed · no AWS change applied</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="coverage">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">03 / Coverage</span>
+            <h2>Built for the paths that don't show up in a policy review.</h2>
+          </div>
+          <p>Winnow covers privilege escalation across 21 techniques, with a supplementary rule scan mapped to MITRE ATT&amp;CK. The result includes what the input could and could not prove.</p>
+        </div>
+
+        <div class="coverage-grid">
+          <div class="coverage-card">
+            <strong>21</strong>
+            <span class="coverage-label">Escalation techniques</span>
+            <p>Graph-based detection across users, groups, roles, policies, and trust edges.</p>
+          </div>
+          <div class="coverage-card">
+            <strong>5</strong>
+            <span class="coverage-label">Input formats</span>
+            <p>Terraform HCL, plan JSON, IAM policy JSON, iam-vulnerable exports, and live AWS.</p>
+          </div>
+          <div class="coverage-card">
+            <strong>2</strong>
+            <span class="coverage-label">Read-only AWS calls</span>
+            <p>GetAccountAuthorizationDetails and GetCallerIdentity. Nothing mutating.</p>
+          </div>
+          <div class="coverage-card">
+            <strong>Optional</strong>
+            <span class="coverage-label">AI pass</span>
+            <p>Claude, OpenAI, DeepSeek, or Ollama. The deterministic engine works without a key.</p>
+          </div>
+        </div>
+
+        <div class="ledger">
+          <div class="ledger-head">
+            <strong>Pattern ledger</strong>
+            <span>Sample of covered techniques</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">iam:AttachUserPolicy</span>
+            <span class="sev sev-critical">Critical</span>
+            <span class="ledger-desc">Attach any managed policy, including AdministratorAccess.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">iam:PassRole</span>
+            <span class="sev sev-high">High</span>
+            <span class="ledger-desc">Pass a privileged role to EC2, Lambda, or Glue.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">sts:AssumeRole</span>
+            <span class="sev sev-high">High</span>
+            <span class="ledger-desc">Assume roles with elevated permissions.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">iam:CreateAccessKey</span>
+            <span class="sev sev-high">High</span>
+            <span class="ledger-desc">Create access keys for other users.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">organizations:MoveAccount</span>
+            <span class="sev sev-high">High</span>
+            <span class="ledger-desc">Move accounts between OUs to bypass SCPs.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">lambda:CreateFunction</span>
+            <span class="sev sev-medium">Medium</span>
+            <span class="ledger-desc">Create a Lambda with a privileged role.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">ec2:RunInstances</span>
+            <span class="sev sev-medium">Medium</span>
+            <span class="ledger-desc">Launch EC2 with an instance profile.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="ledger-pattern">*</span>
+            <span class="sev sev-critical">Critical</span>
+            <span class="ledger-desc">Full administrative access.</span>
+          </div>
+          <div class="ledger-foot">Plus 13 more techniques and a supplementary rule scan mapped to MITRE ATT&amp;CK.</div>
+        </div>
+
+        <div class="chip-row" role="group" aria-label="Supported input formats">
+          <span class="chip">Terraform .tf</span>
+          <span class="chip">Plan JSON</span>
+          <span class="chip">IAM policy JSON</span>
+          <span class="chip">iam-vulnerable export</span>
+          <span class="chip">Live AWS account</span>
+        </div>
+
+        <div class="coverage-note">Winnow reports coverage limits. Permissions boundaries, session policies, and unsupported resources are called out instead of guessed.</div>
+      </div>
+    </section>
+
+    <section class="section" id="audience">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">04 / Who it's for</span>
+            <h2>For the people who own the blast radius.</h2>
+          </div>
+          <p>Winnow is built for the person who has to answer the question: what can this identity actually reach? It keeps the answer specific, reviewable, and tied to evidence.</p>
+        </div>
+
+        <div class="audience-grid">
+          <article class="audience-card">
+            <div class="audience-label">
+              <span>Cloud engineer</span>
+              <svg class="audience-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M17.5 19H7a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 11a4 4 0 0 1-1.5 8z"/>
+              </svg>
+            </div>
+            <h3>Know what your Terraform grants.</h3>
+            <p>Catch privilege escalation before it ships, with the exact statement and path attached.</p>
+          </article>
+
+          <article class="audience-card">
+            <div class="audience-label">
+              <span>DevSecOps</span>
+              <svg class="audience-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="6" cy="6" r="2.5"/>
+                <circle cx="18" cy="18" r="2.5"/>
+                <path d="M8.5 6H15a3 3 0 0 1 3 3v6.5M6 8.5V15a3 3 0 0 0 3 3h6.5"/>
+              </svg>
+            </div>
+            <h3>Turn findings into reviewable fixes.</h3>
+            <p>Move from risk to a proposed policy diff without losing the evidence or the conditions.</p>
+          </article>
+
+          <article class="audience-card">
+            <div class="audience-label">
+              <span>Security researcher</span>
+              <svg class="audience-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/>
+                <path d="m21 21-4.5-4.5"/>
+              </svg>
+            </div>
+            <h3>Trace every hop.</h3>
+            <p>Inspect effective permissions, trust edges, and conditional paths across a realistic IAM graph.</p>
+          </article>
+
+          <article class="audience-card">
+            <div class="audience-label">
+              <span>Platform lead</span>
+              <svg class="audience-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="4" y="4" width="16" height="16" rx="3"/>
+                <path d="M9 9h6v6H9z"/>
+              </svg>
+            </div>
+            <h3>Review sensitive policy data with care.</h3>
+            <p>Upload a policy or connect read-only AWS access, then review the evidence before making changes.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section trust" id="security">
+      <div class="container trust-grid">
+        <div class="trust-copy">
+          <span class="eyebrow">05 / How it works</span>
+          <h2>Findings stay tied to evidence.</h2>
+          <p>The deterministic engine evaluates the evidence. AI is optional, bounded, and explicit about failure. The AWS scan is read-only by design.</p>
+          <a class="btn-link" href="https://github.com/adnannazirahmed/Winnow-1.1#readme" target="_blank" rel="noreferrer">
+            Read the security notes
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h14M13 6l6 6-6 6"/>
+            </svg>
+          </a>
+        </div>
+
+        <div>
+          <div class="trust-list">
+            <div class="trust-item">
+              <span class="trust-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6v6H9z"/></svg>
+              </span>
+              <div>
+                <h3>Deterministic core</h3>
+                <p>Findings and graphs work without an AI provider. No key, no gate.</p>
+              </div>
+            </div>
+            <div class="trust-item">
+              <span class="trust-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8h14M5 16h14"/></svg>
+              </span>
+              <div>
+                <h3>Bounded AI</h3>
+                <p>AI remediation is capped at 5 uncached calls per analysis and cached by finding content.</p>
+              </div>
+            </div>
+            <div class="trust-item">
+              <span class="trust-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>
+              </span>
+              <div>
+                <h3>Read-only AWS</h3>
+                <p>Exactly two calls: GetAccountAuthorizationDetails and GetCallerIdentity.</p>
+              </div>
+            </div>
+            <div class="trust-item">
+              <span class="trust-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              </span>
+              <div>
+                <h3>No mutation</h3>
+                <p>Remediations are proposals. Winnow does not change IAM.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="policy-card">
+            <div class="policy-head">
+              <span>Minimal read-only policy</span>
+              <button class="copy-btn" type="button" data-copy="#iam-policy-code">Copy</button>
+            </div>
+            <div class="policy-body">
+              <pre><code id="iam-policy-code">{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "iam:GetAccountAuthorizationDetails",
+      "sts:GetCallerIdentity"
+    ],
+    "Resource": "*"
+  }]
+}</code></pre>
+            </div>
+          </div>
+          <span class="sr-only" role="status" aria-live="polite" data-copy-status></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section cta" id="start">
+      <div class="container cta-inner">
+        <div>
+          <span class="eyebrow">06 / Start here</span>
+          <h2>Know exactly what an identity can reach.</h2>
+          <p>Create an account, paste a policy, or connect a read-only AWS account. The evidence stays attached.</p>
+        </div>
+        <div>
+          <div class="cta-actions">
+            <a class="btn btn-primary" href="signup.html?mode=signup">
+              Create account
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6"/>
+              </svg>
+            </a>
+            <a class="btn btn-secondary" href="signup.html" data-app-link>Open the Winnow app</a>
+          </div>
+          <div class="cta-note">Read-only AWS scan · Reviewable policy diff</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html" aria-label="Winnow home">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
+            </span>
+            <span class="brand-copy">
+              <span class="brand-word">Winnow</span>
+              <span class="brand-sub">IAM remediation</span>
+            </span>
+          </a>
+          <p>IAM remediation, with the evidence attached.</p>
+        </div>
+
+        <div class="footer-col">
+          <h3>Product</h3>
+          <a href="#product">Overview</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#coverage">Coverage</a>
+          <a href="signup.html" data-app-link>Open Winnow</a>
+          <a href="signup.html?mode=signup">Create account</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Resources</h3>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1#readme" target="_blank" rel="noreferrer">README</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Project</h3>
+          <a href="https://github.com/adnannazirahmed" target="_blank" rel="noreferrer">Adnan Nazir Ahmed</a>
+          <a href="https://github.com/BishopFox/iam-vulnerable" target="_blank" rel="noreferrer">iam-vulnerable</a>
+          <a href="https://attack.mitre.org/" target="_blank" rel="noreferrer">MITRE ATT&amp;CK</a>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>© 2026 Winnow.</span>
+        <span>Winnow · IAM analysis and remediation.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

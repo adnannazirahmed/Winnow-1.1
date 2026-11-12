@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your account — Winnow</title>
+  <meta name="description" content="Your Winnow account and workspace access.">
+  <meta name="theme-color" content="#0f1312">
+  <meta property="og:title" content="Your account — Winnow">
+  <meta property="og:description" content="Your Winnow account and workspace access.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/winnow-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="account">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Winnow home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="brand-word">Winnow</span>
+          <span class="brand-sub">IAM remediation</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html#product">Product</a>
+        <a href="index.html#workflow">Workflow</a>
+        <a href="index.html#coverage">Coverage</a>
+        <a href="index.html#audience">Who it's for</a>
+        <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn-ghost" href="signup.html" data-app-link>Open Winnow</a>
+        <a class="btn btn-secondary" href="account.html" data-auth-link aria-current="page">Account</a>
+      </div>
+
+      <details class="mobile-menu">
+        <summary class="menu-toggle" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16"/>
+          </svg>
+        </summary>
+        <nav class="mobile-nav" aria-label="Mobile">
+          <a href="index.html#product">Product</a>
+          <a href="index.html#workflow">Workflow</a>
+          <a href="index.html#coverage">Coverage</a>
+          <a href="index.html#audience">Who it's for</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="btn btn-primary" href="account.html" data-auth-link aria-current="page">Account</a>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main class="auth-main" id="main">
+    <section class="auth-intro" aria-labelledby="account-title">
+      <div class="auth-intro-copy">
+        <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Account</span>
+        <h1 id="account-title">Your workspace, <em>signed in.</em></h1>
+        <p>Manage your Winnow account and open your workspace.</p>
+
+        <div class="access-preview">
+          <div class="access-preview-head">What happens next</div>
+          <div class="access-list">
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Open the live Winnow app.</span>
+            </div>
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Connect a read-only AWS account when ready.</span>
+            </div>
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Sign out from this page at any time.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="auth-intro-foot">
+        Ready to work? Open Winnow from your account.
+      </div>
+    </section>
+
+    <section class="auth-form-wrap" aria-labelledby="account-card-title">
+      <div class="auth-loading" id="account-loading">Checking your session…</div>
+
+      <div class="auth-card account-card" id="account-card" hidden>
+        <div class="account-avatar" id="account-avatar" aria-hidden="true">W</div>
+        <span class="eyebrow">Signed in</span>
+        <h2 id="account-card-title">Your Winnow account.</h2>
+        <p class="account-name" id="account-name">…</p>
+        <p class="account-email" id="account-email">…</p>
+
+        <div class="setup-notice" id="account-setup" hidden>
+          <strong>Account access is temporarily unavailable.</strong>
+          Your account is temporarily unavailable. Please try again later.
+        </div>
+
+        <div class="auth-alert" id="account-alert" role="alert" hidden></div>
+
+        <div class="account-actions">
+          <a class="btn btn-primary" href="signup.html" data-app-link>Open Winnow</a>
+          <button class="btn btn-secondary" type="button" id="sign-out">Sign out</button>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html" aria-label="Winnow home">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
+            </span>
+            <span class="brand-copy">
+              <span class="brand-word">Winnow</span>
+              <span class="brand-sub">IAM remediation</span>
+            </span>
+          </a>
+          <p>IAM remediation, with the evidence attached.</p>
+        </div>
+
+        <div class="footer-col">
+          <h3>Product</h3>
+          <a href="index.html#product">Overview</a>
+          <a href="index.html#workflow">Workflow</a>
+          <a href="index.html#coverage">Coverage</a>
+          <a href="signup.html" data-app-link>Open Winnow</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Resources</h3>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1#readme" target="_blank" rel="noreferrer">README</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Project</h3>
+          <a href="https://github.com/adnannazirahmed" target="_blank" rel="noreferrer">Adnan Nazir Ahmed</a>
+          <a href="https://github.com/BishopFox/iam-vulnerable" target="_blank" rel="noreferrer">iam-vulnerable</a>
+          <a href="https://attack.mitre.org/" target="_blank" rel="noreferrer">MITRE ATT&amp;CK</a>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>© 2026 Winnow.</span>
+        <span>Account access for the Winnow project.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

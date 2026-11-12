@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Winnow</title>
+  <meta name="description" content="Sign in to Winnow or create an account for IAM remediation.">
+  <meta name="theme-color" content="#0f1312">
+  <meta property="og:title" content="Sign in — Winnow">
+  <meta property="og:description" content="Start with the paths you can prove.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/winnow-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="auth">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Winnow home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="brand-word">Winnow</span>
+          <span class="brand-sub">IAM remediation</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html#product">Product</a>
+        <a href="index.html#workflow">Workflow</a>
+        <a href="index.html#coverage">Coverage</a>
+        <a href="index.html#audience">Who it's for</a>
+        <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn-ghost" href="signup.html" data-app-link>Open Winnow</a>
+        <a class="btn btn-secondary" href="signup.html" data-auth-link aria-current="page">Sign in</a>
+      </div>
+
+      <details class="mobile-menu">
+        <summary class="menu-toggle" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16"/>
+          </svg>
+        </summary>
+        <nav class="mobile-nav" aria-label="Mobile">
+          <a href="index.html#product">Product</a>
+          <a href="index.html#workflow">Workflow</a>
+          <a href="index.html#coverage">Coverage</a>
+          <a href="index.html#audience">Who it's for</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="btn btn-primary" href="signup.html" data-auth-link aria-current="page">Sign in</a>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main class="auth-main" id="main">
+    <section class="auth-intro" aria-labelledby="access-title">
+      <div class="auth-intro-copy">
+        <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Account access</span>
+        <h1 id="access-title">Start with the paths you can <em>prove.</em></h1>
+        <p>Sign in to your Winnow workspace, or create an account. No AWS credentials are required to start.</p>
+
+        <div class="access-preview">
+          <div class="access-preview-head">What you can do first</div>
+          <div class="access-list">
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Open your Winnow workspace after signing in.</span>
+            </div>
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Paste a Terraform config or IAM policy.</span>
+            </div>
+            <div class="access-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span>Connect a read-only AWS account when ready.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="auth-intro-foot">
+        New to Winnow? Create an account and get started.
+      </div>
+    </section>
+
+    <section class="auth-form-wrap" aria-labelledby="form-title">
+      <div class="auth-card">
+        <span class="eyebrow">Workspace access</span>
+        <h2 id="form-title">Sign in or create an account.</h2>
+        <p class="auth-lede">Your Winnow account is separate from your AWS credentials.</p>
+
+        <div class="setup-notice" id="auth-setup" hidden>
+          <strong>Account access is temporarily unavailable.</strong>
+          Sign-in is temporarily unavailable. Please try again later.
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Account access">
+          <button class="auth-tab" id="tab-signin" type="button" role="tab" aria-selected="true" aria-controls="panel-signin" tabindex="0" data-auth-tab="signin">Sign in</button>
+          <button class="auth-tab" id="tab-signup" type="button" role="tab" aria-selected="false" aria-controls="panel-signup" tabindex="-1" data-auth-tab="signup">Create account</button>
+        </div>
+
+        <div class="auth-panel" id="panel-signin" role="tabpanel" aria-labelledby="tab-signin" data-auth-panel="signin">
+          <div class="auth-alert" id="signin-alert" role="alert" hidden></div>
+          <form class="auth-form" id="signin-form" novalidate>
+            <div class="form-grid">
+              <div class="field field--full">
+                <label for="signin-email">Email <span class="req" aria-hidden="true">*</span></label>
+                <input id="signin-email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required aria-describedby="signin-email-error">
+                <p class="field-error" id="signin-email-error" hidden></p>
+              </div>
+              <div class="field field--full">
+                <label for="signin-password">Password <span class="req" aria-hidden="true">*</span></label>
+                <div class="password-wrap">
+                  <input id="signin-password" name="password" type="password" autocomplete="current-password" required aria-describedby="signin-password-error">
+                  <button class="password-toggle" type="button" data-toggle-password="signin-password" aria-label="Show password">Show</button>
+                </div>
+                <p class="field-error" id="signin-password-error" hidden></p>
+              </div>
+            </div>
+            <div class="auth-row">
+              <button class="link-button" type="button" id="forgot-password">Forgot password?</button>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">Sign in</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="auth-panel" id="panel-signup" role="tabpanel" aria-labelledby="tab-signup" data-auth-panel="signup" hidden>
+          <div class="auth-alert" id="signup-alert" role="alert" hidden></div>
+          <form class="auth-form" id="signup-form" novalidate>
+            <div class="form-grid">
+              <div class="field field--full">
+                <label for="signup-name">Full name <span class="req" aria-hidden="true">*</span></label>
+                <input id="signup-name" name="fullName" type="text" autocomplete="name" required aria-describedby="signup-name-error">
+                <p class="field-error" id="signup-name-error" hidden></p>
+              </div>
+              <div class="field field--full">
+                <label for="signup-email">Work email <span class="req" aria-hidden="true">*</span></label>
+                <input id="signup-email" name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required aria-describedby="signup-email-error">
+                <p class="field-error" id="signup-email-error" hidden></p>
+              </div>
+              <div class="field">
+                <label for="signup-password">Password <span class="req" aria-hidden="true">*</span></label>
+                <div class="password-wrap">
+                  <input id="signup-password" name="password" type="password" autocomplete="new-password" minlength="8" required aria-describedby="signup-password-error">
+                  <button class="password-toggle" type="button" data-toggle-password="signup-password" aria-label="Show password">Show</button>
+                </div>
+                <p class="field-error" id="signup-password-error" hidden></p>
+              </div>
+              <div class="field">
+                <label for="signup-confirm">Confirm password <span class="req" aria-hidden="true">*</span></label>
+                <div class="password-wrap">
+                  <input id="signup-confirm" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required aria-describedby="signup-confirm-error">
+                  <button class="password-toggle" type="button" data-toggle-password="signup-confirm" aria-label="Show password">Show</button>
+                </div>
+                <p class="field-error" id="signup-confirm-error" hidden></p>
+              </div>
+            </div>
+            <p class="form-legal">Use at least 8 characters. Your Winnow account uses Supabase authentication.</p>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">Create account</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="auth-secondary">
+          New to Winnow? Choose Create account above.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html" aria-label="Winnow home">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
+            </span>
+            <span class="brand-copy">
+              <span class="brand-word">Winnow</span>
+              <span class="brand-sub">IAM remediation</span>
+            </span>
+          </a>
+          <p>IAM remediation, with the evidence attached.</p>
+        </div>
+
+        <div class="footer-col">
+          <h3>Product</h3>
+          <a href="index.html#product">Overview</a>
+          <a href="index.html#workflow">Workflow</a>
+          <a href="index.html#coverage">Coverage</a>
+          <a href="signup.html" data-app-link>Open Winnow</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Resources</h3>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/adnannazirahmed/Winnow-1.1#readme" target="_blank" rel="noreferrer">README</a>
+        </div>
+
+        <div class="footer-col">
+          <h3>Project</h3>
+          <a href="https://github.com/adnannazirahmed" target="_blank" rel="noreferrer">Adnan Nazir Ahmed</a>
+          <a href="https://github.com/BishopFox/iam-vulnerable" target="_blank" rel="noreferrer">iam-vulnerable</a>
+          <a href="https://attack.mitre.org/" target="_blank" rel="noreferrer">MITRE ATT&amp;CK</a>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>© 2026 Winnow.</span>
+        <span>Account access for the Winnow project.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

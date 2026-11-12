@@ -1,12 +1,14 @@
 import os
+import json
 import logging
 import hmac
 import secrets
 import time
 import re
+import hashlib
 from pathlib import Path
 from urllib.parse import urlsplit
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, g, Response, redirect, abort
 from dotenv import load_dotenv
 
 from iam_analyzer import IAMAnalyzer
@@ -24,6 +26,8 @@ from organization_intelligence import (
     build_organization_intelligence,
 )
 import settings
+from public_auth import verified_user_id
+from supabase_history import SupabaseAnalysisStore
 
 load_dotenv(dotenv_path=settings.ENV_FILE)
 
@@ -33,6 +37,11 @@ logger = logging.getLogger(__name__)
 # Resolve the frontend directory relative to this file, not the CWD,
 # so the app works no matter where it is launched from.
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
+PUBLIC_MODE = os.environ.get('WINNOW_PUBLIC_MODE') == '1'
+if PUBLIC_MODE:
+    for required in ('SUPABASE_URL', 'SUPABASE_ANON_KEY', 'WINNOW_PUBLIC_ORIGIN'):
+        if not os.environ.get(required):
+            raise RuntimeError(f'{required} is required in hosted mode')
 
 MAX_CONFIG_BYTES = int(os.environ.get('MAX_CONFIG_BYTES', str(1024 * 1024)))  # 1 MB default
 
@@ -48,6 +57,28 @@ visualizer = Visualizer()
 risk_brief_generator = RiskBriefGenerator()
 inventory_store = InventorySnapshotStore()
 analysis_store = AnalysisHistoryStore()
+
+
+def _user_store_path(filename):
+    root = Path(os.environ.get('WINNOW_DATA_ROOT', '/data'))
+    user_hash = hashlib.sha256(g.user_id.encode('ascii')).hexdigest()
+    return root / 'users' / user_hash / filename
+
+
+def _analysis_store():
+    if PUBLIC_MODE:
+        if not hasattr(g, 'analysis_store'):
+            g.analysis_store = SupabaseAnalysisStore(g.user_id, g.access_token)
+        return g.analysis_store
+    return analysis_store
+
+
+def _inventory_store():
+    if PUBLIC_MODE:
+        if not hasattr(g, 'inventory_store'):
+            g.inventory_store = InventorySnapshotStore(_user_store_path('inventory.db'))
+        return g.inventory_store
+    return inventory_store
 
 _SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
 
@@ -106,6 +137,25 @@ def _local_request():
 def protect_local_data():
     if request.path == '/health':
         return None
+    if PUBLIC_MODE:
+        if request.path.startswith('/api/'):
+            origin = request.headers.get('Origin')
+            allowed_origin = os.environ.get('WINNOW_PUBLIC_ORIGIN', '')
+            if origin and origin != allowed_origin:
+                return jsonify({'error': 'Request origin is not allowed.'}), 403
+            if request.method == 'OPTIONS':
+                return Response(status=204)
+            if request.path.startswith(('/api/settings', '/api/scan-account',
+                                        '/api/organization/scan', '/api/generate-dummy')):
+                return jsonify({'error': 'This feature is not available for hosted accounts yet.'}), 503
+            authorization = request.headers.get('Authorization', '')
+            if not authorization.startswith('Bearer '):
+                return jsonify({'error': 'Sign in to continue.'}), 401
+            g.access_token = authorization[7:]
+            g.user_id = verified_user_id(g.access_token)
+            if not g.user_id:
+                return jsonify({'error': 'Your session has expired. Sign in again.'}), 401
+        return None
     if not _local_request():
         hostname = _request_hostname()
         if (hostname not in ('localhost', '127.0.0.1', '::1')
@@ -130,12 +180,25 @@ def protect_local_data():
     return None
 
 
+@app.after_request
+def public_cors(response):
+    if PUBLIC_MODE and request.path.startswith('/api/'):
+        origin = request.headers.get('Origin')
+        if origin and origin == os.environ.get('WINNOW_PUBLIC_ORIGIN', ''):
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Vary'] = 'Origin'
+            response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, DELETE, OPTIONS'
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 def _remember_analysis(payload):
     """Persist a completed result without making history a scan dependency."""
     if app.config.get('TESTING'):
         return payload
     try:
-        payload['history'] = analysis_store.save(payload)
+        payload['history'] = _analysis_store().save(payload)
     except Exception as exc:
         logger.error('Could not save completed analysis history: %s', type(exc).__name__)
     return payload
@@ -296,11 +359,44 @@ def _run_pipeline(iam_data, source='static', source_name=None):
 
 @app.route('/')
 def index():
+    if PUBLIC_MODE:
+        return redirect('https://adnannazirahmed.github.io/Winnow-1.1/', code=302)
     return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
+@app.route('/app/')
+def workspace():
+    if PUBLIC_MODE:
+        return redirect('https://adnannazirahmed.github.io/Winnow-1.1/app/', code=302)
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
+@app.route('/app/<path:path>')
+def workspace_asset(path):
+    if PUBLIC_MODE:
+        abort(404)
+    return send_from_directory(FRONTEND_DIR, path)
+
+
+@app.route('/supabase-config.js')
+def supabase_browser_config():
+    if not PUBLIC_MODE:
+        return Response('window.WINNOW_PUBLIC_MODE = false;', mimetype='application/javascript')
+    config = {
+        'url': os.environ.get('SUPABASE_URL', ''),
+        'anonKey': os.environ.get('SUPABASE_ANON_KEY', ''),
+    }
+    source = ('window.WINNOW_PUBLIC_MODE = true;\nwindow.WINNOW_SUPABASE = '
+              + json.dumps(config) + ';\n')
+    response = Response(source, mimetype='application/javascript')
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.route('/<path:path>')
 def serve_static(path):
+    if PUBLIC_MODE:
+        abort(404)
     return send_from_directory(FRONTEND_DIR, path)
 
 
@@ -377,8 +473,8 @@ def analysis_history():
     """List recent local analyses or remove the complete local history."""
     try:
         if request.method == 'DELETE':
-            return jsonify({'deleted': analysis_store.clear(), 'runs': []})
-        return jsonify({'runs': analysis_store.list()})
+            return jsonify({'deleted': _analysis_store().clear(), 'runs': []})
+        return jsonify({'runs': _analysis_store().list()})
     except Exception as exc:
         logger.error('Could not access analysis history: %s', type(exc).__name__)
         return jsonify({'error': 'Saved analysis history is unavailable.'}), 500
@@ -387,7 +483,7 @@ def analysis_history():
 @app.route('/api/history/latest', methods=['GET'])
 def latest_analysis():
     try:
-        analysis = analysis_store.latest()
+        analysis = _analysis_store().latest()
         return jsonify({'available': bool(analysis), 'analysis': analysis})
     except Exception as exc:
         logger.error('Could not restore the latest analysis: %s', type(exc).__name__)
@@ -398,11 +494,11 @@ def latest_analysis():
 def saved_analysis(run_id):
     try:
         if request.method == 'DELETE':
-            deleted = analysis_store.delete(run_id)
+            deleted = _analysis_store().delete(run_id)
             if not deleted:
                 return jsonify({'error': 'Saved analysis was not found.'}), 404
             return jsonify({'deleted': True, 'id': run_id})
-        analysis = analysis_store.get(run_id)
+        analysis = _analysis_store().get(run_id)
         if not analysis:
             return jsonify({'error': 'Saved analysis was not found.'}), 404
         return jsonify({'analysis': analysis})
@@ -462,7 +558,7 @@ def generate_remediation():
     history_id = data.get('history_id') if isinstance(data, dict) else None
     if history_id is not None:
         try:
-            history_saved = analysis_store.update_remediation(
+            history_saved = _analysis_store().update_remediation(
                 int(history_id), clean_finding['id'], remediation
             )
         except (TypeError, ValueError):
@@ -478,8 +574,10 @@ def generate_remediation():
 
 @app.route('/api/organization', methods=['GET'])
 def latest_organization_inventory():
+    if PUBLIC_MODE:
+        return jsonify({'available': False, 'inventory': None})
     try:
-        latest = inventory_store.latest_any()
+        latest = _inventory_store().latest_any()
     except Exception as exc:
         logger.error('Could not read the saved organization inventory: %s', type(exc).__name__)
         return jsonify({'available': False, 'error': 'Saved organization inventory is unavailable.'}), 500
@@ -532,7 +630,7 @@ def scan_organization():
     scope_key = str(collected.get('scope_key') or 'connected-account')
     warnings = list(collected.get('warnings') or []) + parse_warnings
     try:
-        previous = inventory_store.latest(scope_key)
+        previous = _inventory_store().latest(scope_key)
     except Exception:
         previous = None
         warnings.append('The previous local snapshot could not be read, so change detection is unavailable.')
@@ -544,7 +642,7 @@ def scan_organization():
         source='aws-organization',
     )
     try:
-        inventory_store.save(scope_key, inventory)
+        _inventory_store().save(scope_key, inventory)
     except Exception as exc:
         logger.error('Could not save organization inventory snapshot: %s', type(exc).__name__)
         inventory['coverage']['warnings'].append(
