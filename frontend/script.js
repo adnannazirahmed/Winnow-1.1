@@ -359,7 +359,8 @@
     $('stat-findings').textContent = state.data.findings.length + ' findings';
     $('stat-identities').textContent = state.data.identityCount + ' identities';
     $('stat-techniques').textContent = state.data.escalationPaths + ' paths';
-    var sourceLabel = state.data.source === 'live' ? 'AWS account'
+    var sourceLabel = state.data.sourceName === 'No scan started' ? 'Ready for input'
+      : state.data.source === 'live' ? 'AWS account'
       : state.data.source === 'demo' ? 'Demo'
       : state.data.source === 'offline-demo' ? 'Offline demo'
       : state.data.coverage.input_format === 'terraform_hcl' ? 'Terraform code'
@@ -1863,7 +1864,7 @@
       visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
       risk_brief: null,
       summary: {
-        source: 'demo', source_name: 'No scan started',
+        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
         identity_count: 0, policy_count: 0, escalation_paths: 0,
         coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
         ai_status: 'enabled'
