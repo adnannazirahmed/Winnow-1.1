@@ -7,6 +7,7 @@ import time
 import re
 import hashlib
 from pathlib import Path
+from functools import wraps
 from urllib.parse import urlsplit
 from flask import Flask, request, jsonify, send_from_directory, g, Response, redirect, abort
 from dotenv import load_dotenv
@@ -83,6 +84,23 @@ def _claim_public_ai():
     except Exception as exc:
         logger.warning('Could not reserve public AI allowance: %s', type(exc).__name__)
         return False
+
+
+def scan_limited(handler):
+    """Count each submitted scan attempt against the UTC daily allowance."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        if not PUBLIC_MODE:
+            return handler(*args, **kwargs)
+        try:
+            allowed = _analysis_store().claim_scan_allowance()
+        except Exception as exc:
+            logger.warning('Could not reserve scan allowance: %s', type(exc).__name__)
+            return jsonify({'error': 'Scan allowance is temporarily unavailable. Try again later.'}), 503
+        if not allowed:
+            return jsonify({'error': 'Daily scan limit reached: 5 scans per user. Resets at midnight UTC.'}), 429
+        return handler(*args, **kwargs)
+    return wrapped
 
 
 def _inventory_store():
@@ -418,6 +436,7 @@ def serve_static(path):
 
 
 @app.route('/api/analyze', methods=['POST'])
+@scan_limited
 def analyze():
     try:
         data = request.get_json(silent=True)
@@ -447,6 +466,7 @@ def analyze():
 
 
 @app.route('/api/scan-account', methods=['POST'])
+@scan_limited
 def scan_account():
     """Scan the caller's live AWS account (read-only). Credentials come from the
     standard boto3 chain (AWS_PROFILE or AWS_* env vars). Never returns a stack
@@ -608,6 +628,7 @@ def latest_organization_inventory():
 
 
 @app.route('/api/organization/scan', methods=['POST'])
+@scan_limited
 def scan_organization():
     """Build a read-only identity inventory across discoverable AWS accounts."""
     try:
@@ -754,3 +775,4 @@ if __name__ == '__main__':
     # Bind to localhost by default; set HOST=0.0.0.0 explicitly for containers.
     host = os.environ.get('HOST', '127.0.0.1')
     app.run(host=host, port=port, debug=debug)
+

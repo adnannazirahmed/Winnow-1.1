@@ -42,6 +42,13 @@ class SupabaseAnalysisStore:
         with urlopen(Request(url, data=data, headers=headers, method='POST'), timeout=5) as response:
             return json.load(response) is True
 
+    def claim_scan_allowance(self):
+        url = os.environ['SUPABASE_URL'].rstrip('/') + '/rest/v1/rpc/claim_scan_allowance'
+        headers = {'apikey': self.public_key, 'Authorization': 'Bearer ' + self.access_token,
+                   'Content-Type': 'application/json'}
+        with urlopen(Request(url, data=b'{}', headers=headers, method='POST'), timeout=5) as response:
+            return json.load(response) is True
+
     @staticmethod
     def _metadata(row):
         return {key: row.get(key) for key in (
@@ -114,3 +121,4 @@ class SupabaseAnalysisStore:
         rows = self._request('PATCH', query={'id': 'eq.' + str(int(run_id)), 'select': 'id'},
                              body={'payload': analysis})
         return bool(rows)
+
