@@ -201,7 +201,7 @@ return a complete, placeholder-free, fail-closed hardened_policy."""
     # Public API
     # ------------------------------------------------------------------
 
-    def batch_remediate(self, vulnerabilities: List[Dict]) -> List[Dict]:
+    def batch_remediate(self, vulnerabilities: List[Dict], allow_ai=True) -> List[Dict]:
         """Remediate a batch. At most `max_ai_calls_per_batch` uncached AI
         calls are made; findings that cannot be sent to AI are explicit."""
         results = []
@@ -219,10 +219,11 @@ return a complete, placeholder-free, fail-closed hardened_policy."""
                 )
                 remaining = getattr(self._call_context, 'remaining', None)
                 within_limit = remaining is None or remaining > 0
-                if provider_ready and within_limit:
+                if provider_ready and within_limit and allow_ai:
                     result = self._get_ai_remediation(vuln)
                 else:
                     reason = (
+                        'Daily AI allowance reached.' if not allow_ai else
                         'AI remediation call limit reached for this scan.'
                         if provider_ready
                         else 'AI provider is not configured.'
