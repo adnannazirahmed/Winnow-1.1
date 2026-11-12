@@ -231,6 +231,33 @@ button {
   color: var(--mute);
 }
 
+body[data-page="home"] {
+  --header-h: 84px;
+}
+
+body[data-page="home"] .site-header .brand {
+  gap: 14px;
+}
+
+body[data-page="home"] .site-header .brand-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+body[data-page="home"] .site-header .brand-mark svg {
+  width: 27px;
+  height: 27px;
+}
+
+body[data-page="home"] .site-header .brand-word {
+  font-size: 28px;
+}
+
+body[data-page="home"] .site-header .brand-sub {
+  font-size: 9px;
+}
+
 .nav {
   display: flex;
   align-items: center;
@@ -978,6 +1005,27 @@ button {
   gap: clamp(32px, 6vw, 72px);
   align-items: start;
   margin-top: 40px;
+}
+
+.workflow-animation {
+  width: min(960px, 100%);
+  margin: clamp(40px, 6vw, 72px) auto 0;
+}
+
+.workflow-animation img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.workflow-animation figcaption {
+  margin-top: 12px;
+  color: var(--mute);
+  font: 11px var(--mono);
+  text-align: center;
 }
 
 .workflow-steps {

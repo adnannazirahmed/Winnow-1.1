@@ -10,6 +10,11 @@
   window.WINNOW_PUBLIC_APP = true;
   document.body.classList.add('hosted');
   var accountLink = document.getElementById('hosted-account-link');
+  var accountDialog = document.getElementById('account-dialog');
+  var accountDialogName = document.getElementById('account-dialog-name');
+  var accountDialogError = document.getElementById('account-dialog-error');
+  var accountCancel = document.getElementById('account-dialog-cancel');
+  var accountSignOut = document.getElementById('account-dialog-sign-out');
   var client = window.supabase.createClient(config.url, config.anonKey);
   var originalFetch = window.fetch.bind(window);
   function accountName(user) {
@@ -30,10 +35,29 @@
     if (!session || !session.user) return;
     var name = accountName(session.user);
     accountLink.textContent = name;
-    accountLink.title = 'Account: ' + name;
-    accountLink.setAttribute('aria-label', 'Account for ' + name);
+    accountLink.title = 'Account options: ' + name;
+    accountLink.setAttribute('aria-label', 'Account options for ' + name);
+    accountDialogName.textContent = name;
     accountLink.hidden = false;
   }
+  accountLink.addEventListener('click', function (event) {
+    event.preventDefault();
+    accountDialogError.hidden = true;
+    accountDialog.showModal();
+    accountCancel.focus();
+  });
+  accountCancel.addEventListener('click', function () { accountDialog.close(); });
+  accountSignOut.addEventListener('click', function () {
+    accountSignOut.disabled = true;
+    client.auth.signOut().then(function (result) {
+      if (result.error) throw result.error;
+      window.location.replace('../signup.html');
+    }).catch(function () {
+      accountSignOut.disabled = false;
+      accountDialogError.textContent = 'Could not log out. Try again.';
+      accountDialogError.hidden = false;
+    });
+  });
   function getSession() {
     return client.auth.getSession().then(function (result) {
       if (result.error) throw result.error;

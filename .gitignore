@@ -12,6 +12,7 @@ ENV/
 dist/
 build/
 site-dist/
+/handoff.md
 
 # Secrets / environment
 .env
