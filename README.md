@@ -298,6 +298,13 @@ response.
 
 ## 🔧 Configuration
 
+Each signed-in public user can submit **five scans per UTC day**. Local
+installations have unlimited scans. Submitted public scan attempts count even if
+validation or analysis fails. The allowance resets at midnight UTC and is stored
+separately from history, so clearing history does not reset it. Hosted deployments
+must apply `202611120003_daily_scan_allowance.sql` with the updated API.
+
+
 ### Environment Variables
 
 ```bash
