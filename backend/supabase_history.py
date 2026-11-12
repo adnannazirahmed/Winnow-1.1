@@ -30,6 +30,18 @@ class SupabaseAnalysisStore:
             raw = response.read()
         return json.loads(raw) if raw else []
 
+    def claim_ai_allowance(self, daily_limit):
+        """Atomically reserve one daily AI request for this authenticated user."""
+        url = os.environ['SUPABASE_URL'].rstrip('/') + '/rest/v1/rpc/claim_ai_allowance'
+        data = json.dumps({'daily_limit': daily_limit}).encode('utf-8')
+        headers = {
+            'apikey': self.public_key,
+            'Authorization': 'Bearer ' + self.access_token,
+            'Content-Type': 'application/json',
+        }
+        with urlopen(Request(url, data=data, headers=headers, method='POST'), timeout=5) as response:
+            return json.load(response) is True
+
     @staticmethod
     def _metadata(row):
         return {key: row.get(key) for key in (

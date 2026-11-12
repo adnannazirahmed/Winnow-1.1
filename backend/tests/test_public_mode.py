@@ -82,6 +82,14 @@ class PublicModeTests(unittest.TestCase):
         self.assertEqual(self.client.get('/app/').status_code, 302)
         self.assertEqual(self.client.get('/app/script.js').status_code, 404)
 
+    def test_ai_allowance_fails_closed_when_supabase_is_unavailable(self):
+        with app_module.app.test_request_context('/api/analyze'):
+            app_module.g.user_id = USER_A
+            app_module.g.access_token = 'a'
+            with mock.patch.object(app_module.SupabaseAnalysisStore, 'claim_ai_allowance',
+                                   side_effect=OSError('offline')):
+                self.assertFalse(app_module._claim_public_ai())
+
 
 class TokenVerificationTests(unittest.TestCase):
     def test_validated_id_comes_from_auth_response(self):
@@ -102,6 +110,16 @@ class TokenVerificationTests(unittest.TestCase):
 
 
 class SupabaseHistoryTests(unittest.TestCase):
+    def test_ai_allowance_uses_authenticated_rpc(self):
+        with mock.patch.dict(os.environ, {'SUPABASE_URL': 'https://example.supabase.co',
+                                       'SUPABASE_ANON_KEY': 'publishable'}), \
+             mock.patch('supabase_history.urlopen', return_value=BytesIO(b'true')) as send:
+            store = SupabaseAnalysisStore(USER_A, 'user-access-token')
+            self.assertTrue(store.claim_ai_allowance(3))
+            request = send.call_args.args[0]
+            self.assertEqual(request.get_header('Authorization'), 'Bearer user-access-token')
+            self.assertEqual(request.full_url, 'https://example.supabase.co/rest/v1/rpc/claim_ai_allowance')
+
     def test_history_request_uses_user_bearer(self):
         with mock.patch.dict(os.environ, {'SUPABASE_URL': 'https://example.supabase.co',
                                        'SUPABASE_ANON_KEY': 'publishable'}), \

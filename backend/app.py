@@ -73,6 +73,18 @@ def _analysis_store():
     return analysis_store
 
 
+def _claim_public_ai():
+    """Reserve a bounded AI request; keep rule analysis available on quota failure."""
+    if not PUBLIC_MODE:
+        return True
+    try:
+        limit = max(1, min(int(os.environ.get('MAX_PUBLIC_AI_REQUESTS_PER_DAY', '3')), 100))
+        return _analysis_store().claim_ai_allowance(limit)
+    except Exception as exc:
+        logger.warning('Could not reserve public AI allowance: %s', type(exc).__name__)
+        return False
+
+
 def _inventory_store():
     if PUBLIC_MODE:
         if not hasattr(g, 'inventory_store'):
@@ -258,7 +270,7 @@ def _merge_findings(graph_findings, rule_findings):
     return merged
 
 
-def _run_pipeline(iam_data, source='static', source_name=None):
+def _run_pipeline(iam_data, source='static', source_name=None, allow_ai=True):
     """IAMData -> permission graph -> merged findings -> AI pass -> remediation ->
     visualization. Returns the JSON body shared by /api/analyze and /api/scan-account."""
     graph_output = iam_graph.process_iam_data(iam_data)
@@ -271,7 +283,7 @@ def _run_pipeline(iam_data, source='static', source_name=None):
     )
 
     ai_vulnerabilities = []
-    if ai_detector.enabled:
+    if ai_detector.enabled and allow_ai:
         ai_vulnerabilities = ai_detector.dedupe(
             static_vulnerabilities,
             ai_detector.detect(iam_data.model_dump(mode='json'), static_vulnerabilities),
@@ -287,7 +299,8 @@ def _run_pipeline(iam_data, source='static', source_name=None):
         vuln['id'] = f"VULN-{i:04d}"
         vuln['account_id'] = iam_data.account_id
 
-    remediations = remediator.batch_remediate(vulnerabilities)
+    remediations = (remediator.batch_remediate(vulnerabilities) if allow_ai
+                    else remediator.batch_remediate(vulnerabilities, allow_ai=False))
     remediation_results = [
         {'vulnerability': vuln, 'remediation': remediation}
         for vuln, remediation in zip(vulnerabilities, remediations)
@@ -316,11 +329,15 @@ def _run_pipeline(iam_data, source='static', source_name=None):
             for entity in entities
         ),
         'coverage': iam_data.coverage.model_dump(mode='json'),
-        'ai_status': 'enabled' if ai_detector.enabled else 'disabled',
+        'ai_status': 'enabled' if ai_detector.enabled and allow_ai else 'disabled',
     }
-    risk_brief = risk_brief_generator.generate(
-        summary, vulnerabilities, remediation_results, visualization_data
-    )
+    if allow_ai:
+        risk_brief = risk_brief_generator.generate(
+            summary, vulnerabilities, remediation_results, visualization_data)
+    else:
+        risk_brief = risk_brief_generator.generate(
+            summary, vulnerabilities, remediation_results, visualization_data,
+            allow_ai=False)
     organization = build_organization_intelligence(
         [{
             'account': {
@@ -415,7 +432,11 @@ def analyze():
         source_name = str(data.get('source_name') or '')[:160] or None
 
         iam_data = iam_ingest.config_to_iamdata(iam_config, config_type)
-        result = _run_pipeline(iam_data, source=source, source_name=source_name)
+        ai_available = ai_detector.enabled or risk_brief_generator.enabled
+        result = _run_pipeline(
+            iam_data, source=source, source_name=source_name,
+            allow_ai=not ai_available or _claim_public_ai(),
+        )
         return jsonify(_remember_analysis(result))
     except ValueError as e:
         logger.warning('Invalid analyze request: %s', type(e).__name__)
@@ -553,6 +574,8 @@ def generate_remediation():
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
+    if PUBLIC_MODE and not _claim_public_ai():
+        return jsonify({'error': 'Daily AI allowance reached. Try again tomorrow.'}), 429
     remediation = remediator.get_remediation(clean_finding)
     history_saved = False
     history_id = data.get('history_id') if isinstance(data, dict) else None

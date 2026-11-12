@@ -56,7 +56,7 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
 
     def generate(self, summary: Dict[str, Any], findings: List[Dict[str, Any]],
                  remediation_results: List[Dict[str, Any]],
-                 visualization: Dict[str, Any]) -> Dict[str, Any]:
+                 visualization: Dict[str, Any], allow_ai=True) -> Dict[str, Any]:
         evidence = self._evidence(summary, findings, remediation_results, visualization)
         cache_key = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, default=str).encode('utf-8')
@@ -66,8 +66,8 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
             if cached is not None:
                 return copy.deepcopy(cached)
 
-        if not self.enabled:
-            return self._unavailable(evidence, 'AI provider is not configured.')
+        if not self.enabled or not allow_ai:
+            return self._unavailable(evidence, 'Daily AI allowance reached.' if not allow_ai else 'AI provider is not configured.')
 
         try:
             prompt_evidence = self._prompt_evidence(evidence)
