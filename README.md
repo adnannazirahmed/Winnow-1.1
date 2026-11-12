@@ -31,9 +31,13 @@ The **IAM Remediation Assistant** is a full-stack security tool that:
    techniques, plus a supplementary rule scan mapped to MITRE ATT&CK.
 3. **Explains** every detected path with the matched policy evidence, decision
    status, and any conditions or missing context that still need human review.
-4. **Remediates** in a reviewable policy workbench with Original, Proposed, and
-   Diff views, required inputs, and structural validation. An AI provider is optional;
-   without a key the deterministic engine remains available.
+4. **Reviews** AI-generated remediation proposals in a workbench with Original,
+   Proposed, and Diff views and validation. AI is optional for detection; without
+   a configured provider, reports and remediation proposals are unavailable.
+
+The hosted workbench accepts uploaded or pasted configuration. To connect and
+scan a live AWS account, download and run Winnow on your own computer using the
+[local installation instructions](#installation).
 
 ---
 
@@ -80,12 +84,12 @@ flowchart TB
     class note muted
 ```
 
-Everything runs in one Flask process. `/api/analyze` takes an uploaded or pasted config;
-`/api/scan-account` pulls the caller's live account with **two read-only AWS calls**
-and nothing else. Both feed the same pipeline: build a permission graph → walk the
+In local mode, one Flask process serves the app and API. `/api/analyze` takes an
+uploaded or pasted config; `/api/scan-account` pulls the caller's live account
+using read-only IAM and STS APIs. Both feed the same pipeline: build a permission graph → walk the
 escalation techniques → merge a supplementary rule scan → (optionally) an AI
-pass → remediate → visualize. With no configured AI provider the AI passes are skipped
-and the deterministic engine still produces every finding, remediation, and graph.
+pass → remediate → visualize. With no configured AI provider, deterministic
+findings and graphs remain available; AI reports and proposals are unavailable.
 The response includes source metadata and coverage warnings so an empty result is
 shown as an empty result instead of being replaced by sample data.
 When AI is enabled, Winnow sends relevant IAM policy and finding data to the
@@ -179,8 +183,8 @@ Winnow-1.1/
 │   ├── iam_graph.py        # orchestrates build → evaluate → detect → GraphOutput
 │   ├── graph_to_findings.py# escalation paths → Winnow Vulnerability dicts
 │   ├── iam_analyzer.py     # supplementary rule scan + generate_dummy_data
-│   ├── ai_detector.py      # optional Claude second pass for missed findings
-│   ├── remediator.py       # remediation engine (rule-based + optional Claude)
+│   ├── ai_detector.py      # optional AI second pass for missed findings
+│   ├── remediator.py       # AI proposals, validation, cache, and unavailable states
 │   ├── visualizer.py       # permission graph + heatmap + timeline payloads
 │   ├── tests/              # unit + integration tests (+ tests/fixtures/*.json)
 │   ├── requirements.txt    # Python dependencies
@@ -225,11 +229,10 @@ and warnings for context the input cannot prove, such as permissions boundaries 
 organization/session policies. Invalid Terraform or JSON is rejected with an actionable
 error, and a valid input with no findings stays empty in the interface.
 
-**Remediations are proposals.** The workbench shows the retained source statement
-beside the proposed policy and a compact diff. It verifies policy structure and
-condition preservation, lists placeholders that must be supplied, and clearly
-states that no AWS change has been applied. The review control records only a local
-review state; the application does not mutate IAM.
+**Remediations are proposals.** When an AI proposal is available, the workbench
+shows the retained source statement beside the proposed policy and a compact diff.
+It checks policy structure, condition preservation, and whether the proposal is
+ready for review. No AWS change is applied by the application.
 
 **Stateless analysis.** Finding IDs are assigned per request (sorted by severity
 then resource), so the same input always produces the same IDs across processes
@@ -239,7 +242,13 @@ and Gunicorn workers. Escalation-path IDs are `<identity>::<technique>`, not ran
 (`MAX_AI_REMEDIATIONS`, default 5 uncached calls per analysis) and cached by
 finding content, so a 200-finding config cannot trigger 200 API calls. Any
 API failure or an unparseable response is shown as unavailable; Winnow does not
-substitute rule-generated report or remediation text.
+substitute rule-generated report or remediation text. This per-scan limit covers
+remediation provider calls, not the separate detection and risk-brief calls.
+
+Hosted AI usage has a separate allowance: by default, three AI-enabled actions
+per user per UTC day, with a shared ceiling of 25 across users when the global-budget
+migration is applied. An action may trigger multiple provider calls. These limits
+are not a monetary spending cap, and local mode does not use the hosted allowance.
 
 **Untrusted input.** IAM configs, and any text the model returns, are treated
 as untrusted: all values are HTML-escaped for text *and* attribute contexts,
@@ -344,7 +353,8 @@ configuration only when the URL, API key, and model work together.
 | `GET` | `/api/settings` | Return connection status without exposing credentials |
 | `POST` / `DELETE` | `/api/settings/aws` | Save-and-verify or remove local AWS credentials |
 | `POST` / `DELETE` | `/api/settings/ai` | Verify and save, or remove, the active local AI provider and its provider URL |
-| `POST` | `/api/scan-account` | Scan the caller's live AWS account (read-only) and analyze it |
+| `POST` | `/api/remediate` | Generate or retrieve an AI proposal for a finding |
+| `GET` / `DELETE` | `/api/history` | List or clear saved analyses |
 | `GET` | `/api/organization` | Return the latest saved organization inventory, when available |
 | `POST` | `/api/organization/scan` | Discover accounts and build a read-only identity/anomaly inventory |
 | `POST` | `/api/generate-dummy` | Return the bundled demo config |
@@ -476,6 +486,9 @@ The public release uses GitHub Pages for the supplied marketing and account page
 Supabase for authentication and saved analysis, and Render for the Python analyzer.
 The Pages workbench sends authenticated API requests to Render. See
 [`website/README.md`](website/README.md) for the current setup and launch gates.
+Hosted mode currently disables AWS account connections, live AWS scans, local
+integration settings, and the backend demo endpoint. Run Winnow locally for live
+AWS and organization scans. Upload and paste analysis are supported in hosted mode.
 
 The AWS and Docker instructions below describe the earlier local installation.
 They do not configure the public account flow.
