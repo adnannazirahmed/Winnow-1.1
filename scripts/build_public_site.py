@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import hashlib
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -31,6 +32,15 @@ def build():
         shutil.rmtree(OUTPUT)
     shutil.copytree(ROOT / 'website', OUTPUT)
     shutil.copytree(ROOT / 'frontend', OUTPUT / 'app')
+    app_page = OUTPUT / 'app' / 'index.html'
+    app_html = app_page.read_text(encoding='utf-8')
+    for asset, attribute in (('style.css', 'href'), ('public-app.js', 'src')):
+        original = f'{attribute}="{asset}"'
+        if app_html.count(original) != 1:
+            raise SystemExit(f'Expected one {asset} reference in the app page')
+        digest = hashlib.sha256((OUTPUT / 'app' / asset).read_bytes()).hexdigest()[:12]
+        app_html = app_html.replace(original, f'{attribute}="{asset}?v={digest}"')
+    app_page.write_text(app_html, encoding='utf-8')
     config = (
         'window.WINNOW_PUBLIC_MODE = true;\n'
         'window.WINNOW_API_ORIGIN = ' + json.dumps(api_origin) + ';\n'
