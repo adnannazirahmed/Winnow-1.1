@@ -1007,6 +1007,23 @@ body[data-page="home"] .site-header .brand-sub {
   margin-top: 40px;
 }
 
+.workflow-local-note {
+  width: min(960px, 100%);
+  margin: 36px auto 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.workflow-local-note a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .workflow-animation {
   width: min(960px, 100%);
   margin: clamp(40px, 6vw, 72px) auto 0;
