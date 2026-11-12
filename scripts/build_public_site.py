@@ -32,6 +32,16 @@ def build():
         shutil.rmtree(OUTPUT)
     shutil.copytree(ROOT / 'website', OUTPUT)
     shutil.copytree(ROOT / 'frontend', OUTPUT / 'app')
+    site_style = 'styles.css'
+    site_style_digest = hashlib.sha256((OUTPUT / site_style).read_bytes()).hexdigest()[:12]
+    for page in OUTPUT.glob('*.html'):
+        html = page.read_text(encoding='utf-8')
+        original = f'href="{site_style}"'
+        if original in html:
+            if html.count(original) != 1:
+                raise SystemExit(f'Expected one {site_style} reference in {page.name}')
+            page.write_text(html.replace(original, f'href="{site_style}?v={site_style_digest}"'),
+                            encoding='utf-8')
     app_page = OUTPUT / 'app' / 'index.html'
     app_html = app_page.read_text(encoding='utf-8')
     for asset, attribute in (('style.css', 'href'), ('public-app.js', 'src')):
