@@ -87,7 +87,7 @@
           <div class="hero-trust" role="group" aria-label="Product foundations">
             <span class="trust-item">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-              Read-only AWS scan
+              AWS scan: local install
             </span>
             <span class="trust-item">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
@@ -174,7 +174,7 @@
         <span class="proof-sep" aria-hidden="true"></span>
         <span>Mapped to MITRE ATT&amp;CK</span>
         <span class="proof-sep" aria-hidden="true"></span>
-        <span>Read-only AWS scan</span>
+        <span>AWS scan requires local install</span>
         <span class="proof-sep" aria-hidden="true"></span>
         <span>Reviewable remediation</span>
       </div>
@@ -254,7 +254,7 @@
               <span class="step-num">01</span>
               <span class="step-body">
                 <span class="step-title">Ingest</span>
-                <span class="step-desc">Paste Terraform, plan JSON, IAM policy JSON, or connect a read-only AWS account.</span>
+                <span class="step-desc">Paste Terraform, plan JSON, or IAM policy JSON here. To scan an AWS account, run Winnow locally.</span>
               </span>
             </button>
             <button class="workflow-step" id="tab-trace" type="button" role="tab" aria-selected="false" aria-controls="panel-trace" tabindex="-1" data-workflow-tab="trace">
@@ -347,6 +347,7 @@
             </div>
           </div>
         </div>
+        <p class="workflow-local-note">AWS account connection is available only when you run Winnow locally. The hosted app supports file upload and paste. <a href="https://github.com/adnannazirahmed/Winnow-1.1#scan-a-live-aws-account" target="_blank" rel="noreferrer">Read local setup instructions →</a></p>
         <figure class="workflow-animation">
           <img src="https://raw.githubusercontent.com/adnannazirahmed/Winnow-1.1/main/assets/winnow-launch.gif" width="960" height="540" loading="lazy" decoding="async" alt="Animated Winnow walkthrough showing policy input, risk findings, and a reviewable remediation">
           <figcaption>See the workbench in action · 22-second animated walkthrough</figcaption>
@@ -373,12 +374,12 @@
           <div class="coverage-card">
             <strong>5</strong>
             <span class="coverage-label">Input formats</span>
-            <p>Terraform HCL, plan JSON, IAM policy JSON, iam-vulnerable exports, and live AWS.</p>
+            <p>Terraform HCL, plan JSON, IAM policy JSON, and iam-vulnerable exports here; live AWS scanning requires a local install.</p>
           </div>
           <div class="coverage-card">
             <strong>2</strong>
             <span class="coverage-label">Read-only AWS calls</span>
-            <p>GetAccountAuthorizationDetails and GetCallerIdentity. Nothing mutating.</p>
+            <p>Local AWS scans use GetAccountAuthorizationDetails and GetCallerIdentity. Nothing mutating.</p>
           </div>
           <div class="coverage-card">
             <strong>Optional</strong>
@@ -440,7 +441,7 @@
           <span class="chip">Plan JSON</span>
           <span class="chip">IAM policy JSON</span>
           <span class="chip">iam-vulnerable export</span>
-          <span class="chip">Live AWS account</span>
+          <span class="chip">Live AWS · local install</span>
         </div>
 
         <div class="coverage-note">Winnow reports coverage limits. Permissions boundaries, session policies, and unsupported resources are called out instead of guessed.</div>
@@ -503,7 +504,7 @@
               </svg>
             </div>
             <h3>Review sensitive policy data with care.</h3>
-            <p>Upload a policy or connect read-only AWS access, then review the evidence before making changes.</p>
+            <p>Upload a policy here, or run Winnow locally to scan AWS. Review the evidence before making changes.</p>
           </article>
         </div>
       </div>
@@ -514,7 +515,7 @@
         <div class="trust-copy">
           <span class="eyebrow">05 / How it works</span>
           <h2>Findings stay tied to evidence.</h2>
-          <p>The deterministic engine evaluates the evidence. AI is optional, bounded, and explicit about failure. The AWS scan is read-only by design.</p>
+          <p>The deterministic engine evaluates the evidence. AI is optional, bounded, and explicit about failure. Local AWS scans are read-only by design.</p>
           <a class="btn-link" href="https://github.com/adnannazirahmed/Winnow-1.1#readme" target="_blank" rel="noreferrer">
             Read the security notes
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -548,8 +549,8 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>
               </span>
               <div>
-                <h3>Read-only AWS</h3>
-                <p>Exactly two calls: GetAccountAuthorizationDetails and GetCallerIdentity.</p>
+                <h3>Read-only AWS · local</h3>
+                <p>Run Winnow locally to scan AWS using GetAccountAuthorizationDetails and GetCallerIdentity.</p>
               </div>
             </div>
             <div class="trust-item">
@@ -592,7 +593,7 @@
         <div>
           <span class="eyebrow">06 / Start here</span>
           <h2>Know exactly what an identity can reach.</h2>
-          <p>Create an account, paste a policy, or connect a read-only AWS account. The evidence stays attached.</p>
+          <p>Create an account and paste a policy here. For a live AWS account scan, run Winnow locally. The evidence stays attached.</p>
         </div>
         <div>
           <div class="cta-actions">
@@ -604,7 +605,7 @@
             </a>
             <a class="btn btn-secondary" href="signup.html" data-app-link>Open the Winnow app</a>
           </div>
-          <div class="cta-note">Read-only AWS scan · Reviewable policy diff</div>
+          <div class="cta-note">Local-only AWS scan · Reviewable policy diff</div>
         </div>
       </div>
     </section>
