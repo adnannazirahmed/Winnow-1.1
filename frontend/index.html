@@ -32,8 +32,8 @@
         <span>Search</span>
         <span class="kbd">⌘K</span>
       </button>
+      <a href="../account.html" id="hosted-account-link" aria-haspopup="dialog" aria-controls="account-dialog" hidden>Account</a>
       <div class="status-row">
-        <a href="../account.html" id="hosted-account-link" hidden>Account</a>
         <span class="status-dot"></span>
         <span class="status-text" id="status-text" role="status" aria-live="polite">Rule engine · ready</span>
         <button class="icon-btn" id="theme-toggle" title="Toggle theme"></button>
@@ -424,6 +424,17 @@
     <div class="palette-results" id="palette-results"></div>
   </div>
 </div>
+
+<dialog class="account-dialog" id="account-dialog" aria-labelledby="account-dialog-title">
+  <h2 id="account-dialog-title">Log out of Winnow?</h2>
+  <p>You are signed in as <strong id="account-dialog-name">your account</strong>.</p>
+  <p class="account-dialog-error" id="account-dialog-error" role="alert" hidden></p>
+  <div class="account-dialog-actions">
+    <a class="btn" href="../account.html">View account</a>
+    <button class="btn" id="account-dialog-cancel" type="button">Stay signed in</button>
+    <button class="btn btn-danger" id="account-dialog-sign-out" type="button">Log out</button>
+  </div>
+</dialog>
 
 <script src="three.min.js"></script>
 <script src="scenes.js"></script>
