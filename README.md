@@ -470,6 +470,16 @@ prove deployed access.
 
 ## 🌐 Deployment
 
+### Public website and account flow
+
+The public release uses GitHub Pages for the supplied marketing and account pages,
+Supabase for authentication and saved analysis, and Render for the Python analyzer.
+The Pages workbench sends authenticated API requests to Render. See
+[`website/README.md`](website/README.md) for the current setup and launch gates.
+
+The AWS and Docker instructions below describe the earlier local installation.
+They do not configure the public account flow.
+
 ### AWS
 
 The frontend calls the API at a same-origin `/api` path, so Flask serves both

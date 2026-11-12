@@ -34,7 +34,8 @@
   /* GitHub Pages is an offline preview. Keep credentials, uploaded policy
      documents, and scan requests inside the browser instead of sending them
      to a host that does not run Winnow's backend. */
-  var STATIC_PREVIEW = /(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:';
+  var STATIC_PREVIEW = !window.WINNOW_PUBLIC_APP &&
+    (/(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
   var STATIC_PREVIEW_MESSAGE = 'Static demo mode: no AWS, AI, or uploaded data is sent from this site.';
 
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
@@ -126,7 +127,7 @@
     spin: true,
     paletteOpen: false,
     paletteIndex: 0,
-    sourceTab: 'demo',
+    sourceTab: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo',
     analysisStatus: STATIC_PREVIEW ? 'partial' : 'idle',
     analysisError: '',
     scanTime: null,
@@ -166,6 +167,9 @@
     ['history', 'Scan history', ['M3 12a9 9 0 1 0 3-6.7', 'M3 3v6h6', 'M12 7v5l3 2']],
     ['settings', 'Settings', ['M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z', 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.42 2.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.6h-3.4v-.08A1.7 1.7 0 0 0 9.96 19a1.7 1.7 0 0 0-1.88.34l-.06.06-2.42-2.42.06-.06A1.7 1.7 0 0 0 6 15.04 1.7 1.7 0 0 0 4.44 14H4.36v-3.4h.08A1.7 1.7 0 0 0 6 9.56a1.7 1.7 0 0 0-.34-1.88L5.6 7.62 8.02 5.2l.06.06A1.7 1.7 0 0 0 9.96 5.6 1.7 1.7 0 0 0 11 4.04v-.08h3.4v.08A1.7 1.7 0 0 0 15.44 5.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.42 2.42-.06.06A1.7 1.7 0 0 0 19.4 9.56 1.7 1.7 0 0 0 20.96 10.6h.08V14h-.08A1.7 1.7 0 0 0 19.4 15z']]
   ];
+  if (window.WINNOW_PUBLIC_APP) {
+    NAV = NAV.filter(function (item) { return item[0] !== 'settings'; });
+  }
   var TITLES = { overview: 'Posture overview', graph: 'Attack graph', findings: 'Findings', remediation: 'Policy workbench', visualizer: 'Path explorer', organization: 'Organization intelligence', charts: 'Charts', history: 'Scan history', settings: 'Settings' };
 
   /* ---------------- helpers ---------------- */
@@ -1310,6 +1314,7 @@
   /* ---------------- navigation ---------------- */
 
   function goTo(view) {
+    if (window.WINNOW_PUBLIC_APP && view === 'settings') view = 'overview';
     if (state.view === 'overview' && view !== 'overview' && hero) { hero.dispose(); hero = null; }
     if (state.view === 'graph' && view !== 'graph' && graph) { graph.dispose(); graph = null; }
     state.view = view;
@@ -1469,7 +1474,7 @@
   }
 
   function loadSettings() {
-    if (STATIC_PREVIEW) return;
+    if (STATIC_PREVIEW || window.WINNOW_PUBLIC_APP) return;
     fetch('/api/settings').then(function (r) { return r.json(); }).then(function (payload) {
       state.settings = payload;
       renderSettings();
@@ -1503,7 +1508,7 @@
       visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
       risk_brief: null,
       summary: {
-        source: 'demo', source_name: 'No scan started',
+        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
         identity_count: 0, policy_count: 0, escalation_paths: 0,
         coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
         ai_status: 'enabled'
