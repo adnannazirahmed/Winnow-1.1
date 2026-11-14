@@ -196,17 +196,15 @@ button {
 .brand-mark {
   width: 34px;
   height: 34px;
-  border: 1px solid var(--line);
   border-radius: 9px;
   display: grid;
   place-items: center;
-  color: var(--accent);
-  background: var(--panel);
+  overflow: hidden;
 }
 
-.brand-mark svg {
-  width: 18px;
-  height: 18px;
+.brand-mark img {
+  width: 100%;
+  height: 100%;
 }
 
 .brand-copy {
@@ -243,11 +241,6 @@ body[data-page="home"] .site-header .brand-mark {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-}
-
-body[data-page="home"] .site-header .brand-mark svg {
-  width: 27px;
-  height: 27px;
 }
 
 body[data-page="home"] .site-header .brand-word {

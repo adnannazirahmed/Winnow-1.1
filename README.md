@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/winnow-logo.svg" alt="Winnow — IAM Remediation" width="440">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/winnow-logo.svg">
+    <img src="assets/winnow-logo-light.svg" alt="Winnow — IAM Remediation" width="320">
+  </picture>
 </p>
 
 <h1 align="center">IAM Remediation Assistant</h1>

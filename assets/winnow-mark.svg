@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Winnow mark">
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7.5" fill="#0f1312" stroke="#2a332d"/>
+  <g transform="translate(4 3.4)" fill="none" stroke="#b8d8c4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 4.5 8 16 12 8.5 16 16 20.5 4.5"/>
+    <path d="M12 10.3v6.7"/>
+    <circle cx="12" cy="8.5" r="1.8" fill="#b8d8c4" stroke="none"/>
+    <circle cx="12" cy="18.8" r="1.8" fill="#b8d8c4" stroke="none"/>
+  </g>
+</svg>
