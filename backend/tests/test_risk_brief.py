@@ -57,6 +57,17 @@ VISUALIZATION = {'resource_risk_map': {'resources': [
 
 
 class TestRiskBrief(unittest.TestCase):
+    def test_no_findings_never_requests_an_ai_brief(self):
+        provider = FakeProvider('{"headline": "Fabricated risk"}')
+        brief = RiskBriefGenerator(provider).generate(
+            dict(SUMMARY, total_vulnerabilities=0, critical=0, high=0),
+            [], [], {'resource_risk_map': {'resources': []}},
+        )
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(brief['generated_by'], 'unavailable')
+        self.assertEqual(brief['headline'], '')
+        self.assertIn('No findings', brief['error'])
+
     def test_disabled_provider_returns_unavailable_without_a_report(self):
         brief = RiskBriefGenerator(FakeProvider(enabled=False)).generate(
             SUMMARY, FINDINGS, REMEDIATIONS, VISUALIZATION

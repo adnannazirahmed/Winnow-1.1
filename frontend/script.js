@@ -1,9 +1,9 @@
 /* Winnow — front-end controller.
    Vanilla ES5-compatible, no build step. Loaded after scenes.js.
 
-   Data flow: on load we POST the demo IAM config to the Flask API and normalise
-   the response into the shape the views expect. GitHub Pages can still show a
-   bundled findings-only preview, but it never fabricates an AI report.
+   Data flow: a requested scan is sent to the Flask API and normalised into
+   the shape the views expect. A local file preview can show bundled sample
+   findings, clearly labeled as an offline demo.
 
    The mapping below is written against the REAL /api/analyze contract in
    backend/app.py, verified against a live response:
@@ -31,11 +31,9 @@
   'use strict';
 
   var API = '/api/analyze';
-  /* GitHub Pages is an offline preview. Keep credentials, uploaded policy
-     documents, and scan requests inside the browser instead of sending them
-     to a host that does not run Winnow's backend. */
-  var STATIC_PREVIEW = !window.WINNOW_PUBLIC_APP &&
-    (/(^|\.)github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
+  /* Only an explicitly opened local file uses the bundled offline preview.
+     The hosted app must never show sample findings if its configuration fails. */
+  var STATIC_PREVIEW = !window.WINNOW_PUBLIC_APP && window.location.protocol === 'file:';
   var STATIC_PREVIEW_MESSAGE = 'Static demo mode: no AWS, AI, or uploaded data is sent from this site.';
 
   var SEV_VAR = { CRITICAL: 'var(--n-crit)', HIGH: 'var(--n-high)', MEDIUM: 'var(--n-med)', LOW: 'var(--n-low)' };
@@ -210,7 +208,9 @@
   /* Map the /api/analyze response onto the view model. Keys here match the
      verified contract; there are no speculative fallbacks left. */
   function normalise(payload) {
-    if (!payload) return DEMO_RESULT;
+    if (!payload || !Array.isArray(payload.vulnerabilities) || !payload.summary || typeof payload.summary !== 'object') {
+      throw new Error('Analysis response is incomplete.');
+    }
     var raw = payload.vulnerabilities || [];
 
     var findings = raw.map(function (f) {
@@ -369,6 +369,12 @@
   }
 
   function renderAnalysisContext() {
+    if (state.analysisStatus === 'idle' || state.analysisStatus === 'restoring' || state.analysisStatus === 'loading') {
+      $('analysis-context').textContent = state.analysisStatus === 'restoring'
+        ? 'Opening saved analysis…' : state.analysisStatus === 'loading'
+          ? 'Analyzing input…' : 'No scan started · Ready for input';
+      return;
+    }
     var d = state.data, coverage = d.coverage || {}, warnings = coverage.warnings || [];
     var source = d.source === 'live' ? ('AWS ' + (d.accountId || 'account'))
       : (d.sourceName || (d.source === 'demo' ? 'Bundled demo' : d.source === 'offline-demo' ? 'Bundled offline sample' : 'Uploaded JSON'));
@@ -397,8 +403,22 @@
     if (state.briefCollapsed) return;
 
     var host = $('brief-content');
+    if (state.analysisStatus === 'idle' || state.analysisStatus === 'restoring') {
+      host.innerHTML = state.analysisStatus === 'restoring'
+        ? '<div class="brief-loading"><strong>Opening saved analysis…</strong><span>The selected scan’s brief will appear when it loads.</span></div>'
+        : '<div class="brief-loading"><strong>No risk brief yet</strong><span>Run an analysis to create a brief from its evidence.</span></div>';
+      return;
+    }
     if (state.analysisStatus === 'loading') {
       host.innerHTML = '<div class="brief-loading"><strong>Building risk brief…</strong><span>Summarizing findings, paths, and remediations.</span></div>';
+      return;
+    }
+    if (state.analysisStatus === 'error') {
+      host.innerHTML = '<div class="brief-loading"><strong>No risk brief</strong><span>The analysis failed, so no brief was generated.</span></div>';
+      return;
+    }
+    if (!state.data.findings.length) {
+      host.innerHTML = '<div class="brief-loading"><strong>No findings to brief</strong><span>This scan found no supported risks. Review its coverage notes before treating it as clear.</span></div>';
       return;
     }
     var brief = state.data.riskBrief;
@@ -417,9 +437,10 @@
     var score = Math.max(0, Math.min(100, Number(brief.risk_score) || 0));
     var generator = (brief.provider === 'anthropic' ? 'Claude' : brief.provider || 'AI') + ' · evidence grounded';
     var severityClass = score >= 80 ? 'critical' : score >= 55 ? 'high' : score > 0 ? 'medium' : 'low';
+    var briefSource = state.currentScanId ? 'Scan #' + state.currentScanId : 'Current analysis';
 
     host.innerHTML =
-      '<div class="brief-head"><div><div class="brief-kicker">Current analysis</div><div class="brief-generator">' + esc(generator) + '</div></div><span class="tag">AI brief</span></div>' +
+      '<div class="brief-head"><div><div class="brief-kicker">' + esc(briefSource) + '</div><div class="brief-generator">' + esc(generator) + '</div></div><span class="tag">AI brief</span></div>' +
       '<div class="brief-score ' + severityClass + '"><strong>' + esc(score) + '</strong><span>risk<br>out of 100</span></div>' +
       '<div class="brief-title">' + esc(brief.headline || 'Risk summary') + '</div>' +
       '<p class="brief-assessment">' + esc(brief.assessment || '') + '</p>' +
@@ -569,6 +590,11 @@
   function renderResultState() {
     var host = $('result-state');
     var coverage = state.data.coverage || {}, warnings = coverage.warnings || [];
+    if (state.analysisStatus === 'idle' || state.analysisStatus === 'restoring') {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
     if (state.analysisStatus === 'loading') {
       host.hidden = false;
       host.className = 'result-state loading';
@@ -595,21 +621,34 @@
   }
 
   function renderOverview() {
+    var noCurrentResult = state.analysisStatus === 'idle' || state.analysisStatus === 'restoring' ||
+      state.analysisStatus === 'loading' || state.analysisStatus === 'error';
     var crit = countBy('CRITICAL'), high = countBy('HIGH'), med = countBy('MEDIUM'), low = countBy('LOW');
     var top = state.data.risks[0];
     var words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
     var pathCount = state.data.escalationPaths;
-    $('hero-title').innerHTML = pathCount
-      ? esc(words[pathCount] || pathCount) + ' candidate<br>escalation path' + (pathCount === 1 ? '' : 's')
-      : 'No candidate<br>escalation paths';
-    if (top) {
+    $('hero-title').innerHTML = noCurrentResult
+      ? state.analysisStatus === 'loading' ? 'Analyzing<br>input'
+        : state.analysisStatus === 'restoring' ? 'Opening saved<br>analysis'
+        : state.analysisStatus === 'error' ? 'Analysis<br>failed' : 'No scan<br>started'
+      : pathCount
+        ? esc(words[pathCount] || pathCount) + ' candidate<br>escalation path' + (pathCount === 1 ? '' : 's')
+        : 'No candidate<br>escalation paths';
+    if (noCurrentResult) {
+      $('hero-note').textContent = state.analysisStatus === 'error'
+        ? 'The current analysis did not complete.' : state.analysisStatus === 'idle'
+          ? 'Upload or paste an IAM policy to see its findings and paths.'
+          : 'Results will appear when this analysis is ready.';
+      $('hero-risk').textContent = state.analysisStatus === 'error' ? 'no results' : 'awaiting analysis';
+    } else if (top) {
       $('hero-note').textContent = top.name + ' carries ' + top.total + ' finding' + (top.total === 1 ? '' : 's') + '.';
       $('hero-risk').textContent = 'risk ' + top.score + '/100';
     } else {
       $('hero-note').textContent = state.analysisStatus === 'error' ? 'The current analysis did not complete.' : 'No risky resources were found in the supported input.';
       $('hero-risk').textContent = 'no scored resources';
     }
-    $('hero-actions').textContent = state.data.queue.length + ' actions · ' + totalHours() + 'h';
+    $('hero-actions').textContent = noCurrentResult ? 'No result yet'
+      : state.data.queue.length + ' actions · ' + totalHours() + 'h';
 
     var metrics = [
       ['Critical', crit, crit ? 'highest urgency' : 'clear', 'var(--n-crit)'],
@@ -619,6 +658,7 @@
       ['Identities', state.data.identityCount, 'users · roles · groups', 'var(--n-acc)'],
       ['Techniques', state.data.techniques.length, 'MITRE ATT&CK', 'var(--n-mute)']
     ];
+    if (noCurrentResult) metrics.forEach(function (metric) { metric[2] = 'not analyzed'; });
     $('metrics').innerHTML = metrics.map(function (m) {
       return '<div class="metric"><div class="metric-label"><i class="metric-bar" style="background:' + m[3] + '"></i>' + esc(m[0]) + '</div>' +
         '<div class="metric-value">' + esc(m[1]) + '</div><div class="metric-note">' + esc(m[2]) + '</div></div>';
@@ -633,12 +673,12 @@
         '<i style="width:' + pc(r.medium) + ';background:var(--n-med)"></i>' +
         '<i style="width:' + pc(r.low) + ';background:var(--n-low)"></i>' +
         '</span><span class="risk-score">' + esc(r.score) + '/100</span></div>';
-    }).join('') || '<div class="empty-panel">No resource risk to display.</div>';
+    }).join('') || '<div class="empty-panel">' + (noCurrentResult ? 'Run an analysis to see resource risk.' : 'No resource risk to display.') + '</div>';
 
     $('top-findings').innerHTML = state.data.findings.filter(function (f) { return f.severity === 'CRITICAL'; }).slice(0, 6).map(function (f) {
       return '<button class="list-row" data-select="' + esc(f.id) + '" data-goto="remediation"><i class="dot" style="background:' + SEV_VAR[f.severity] + '"></i>' +
         '<span class="title">' + esc(f.title) + '</span><span class="meta">' + esc(f.resource) + '</span></button>';
-    }).join('') || '<div class="empty-panel">No findings in this analysis.</div>';
+    }).join('') || '<div class="empty-panel">' + (noCurrentResult ? 'Run an analysis to see findings.' : 'No findings in this analysis.') + '</div>';
     renderSourcePanel();
     renderResultState();
     renderAnalysisContext();
@@ -1361,16 +1401,40 @@
 
   /* ---------------- analysis ---------------- */
 
-  function beginAnalysis(label) {
+  function emptyAnalysisData() {
+    return normalise({
+      vulnerabilities: [], remediations: [],
+      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
+      risk_brief: null,
+      summary: {
+        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
+        identity_count: 0, policy_count: 0, escalation_paths: 0,
+        coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
+        ai_status: 'disabled'
+      }
+    });
+  }
+
+  function clearCurrentAnalysis() {
     state.requestSerial += 1;
+    state.data = emptyAnalysisData();
+    if (!state.organizationLocked) state.organization = state.data.organization;
     state.currentScanId = null;
-    state.analysisStatus = 'loading';
+    state.scanTime = null;
+    state.selId = null;
+    state.remediationLoads = {};
+    state.selectedPath = null;
+    state.selectedEvidence = 0;
     state.analysisError = '';
+    localStorage.removeItem('winnow-last-scan-id');
+    try { history.replaceState(null, '', '#' + state.view); } catch (e) {}
+  }
+
+  function beginAnalysis(label) {
+    clearCurrentAnalysis();
+    state.analysisStatus = 'loading';
     $('status-text').textContent = label || 'Analyzing…';
-    renderSourcePanel();
-    renderResultState();
-    renderAnalysisContext();
-    renderRiskBrief();
+    renderAll();
     return state.requestSerial;
   }
 
@@ -1504,48 +1568,41 @@
   }
 
   function resetToEmptyAnalysis() {
-    state.data = normalise({
-      vulnerabilities: [], remediations: [],
-      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
-      risk_brief: null,
-      summary: {
-        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
-        identity_count: 0, policy_count: 0, escalation_paths: 0,
-        coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
-        ai_status: 'enabled'
-      }
-    });
-    state.currentScanId = null;
-    state.scanTime = null;
-    state.selId = null;
-    state.remediationLoads = {};
+    clearCurrentAnalysis();
     state.analysisStatus = 'idle';
-    localStorage.removeItem('winnow-last-scan-id');
+    $('status-text').textContent = 'Ready to scan';
     renderAll();
   }
 
   function restoreSavedAnalysis(runId, navigate) {
     if (STATIC_PREVIEW) return Promise.resolve(false);
-    var path = runId ? '/api/history/' + encodeURIComponent(runId) : '/api/history/latest';
-    $('status-text').textContent = 'Restoring saved analysis…';
+    clearCurrentAnalysis();
+    state.analysisStatus = 'restoring';
+    $('status-text').textContent = 'Opening saved analysis…';
+    renderAll();
+    var requestId = state.requestSerial;
+    var path = '/api/history/' + encodeURIComponent(runId);
     return fetch(path).then(function (r) {
       return r.json().then(function (payload) {
         if (!r.ok || payload.error) throw new Error(payload.error || 'Could not restore the saved analysis.');
         return payload;
       });
     }).then(function (payload) {
-      if (!payload.available && !payload.analysis) {
-        resetToEmptyAnalysis();
-        loadHistory();
-        return false;
+      if (requestId !== state.requestSerial) return false;
+      var analysis = payload.analysis;
+      if (!analysis || !analysis.history || Number(analysis.history.id) !== Number(runId) ||
+          !Array.isArray(analysis.vulnerabilities) || !analysis.summary || typeof analysis.summary !== 'object') {
+        throw new Error('The selected scan did not contain a valid analysis.');
       }
-      applyResult(payload.analysis);
+      applyResult(analysis, requestId);
       $('status-text').textContent = 'Restored scan #' + state.currentScanId + ' · ' + state.data.findings.length + ' findings';
       if (navigate) goTo('overview');
       return true;
     }).catch(function (error) {
+      if (requestId !== state.requestSerial) return false;
+      resetToEmptyAnalysis();
       state.historyError = error.message || 'Could not restore the saved analysis.';
-      loadHistory();
+      renderHistory();
       return false;
     });
   }
@@ -1556,7 +1613,7 @@
     requestJSON('/api/history/' + encodeURIComponent(runId), 'DELETE').then(function () {
       var wasCurrent = Number(state.currentScanId) === Number(runId);
       return loadHistory().then(function () {
-        if (wasCurrent) return restoreSavedAnalysis(null, false);
+        if (wasCurrent) resetToEmptyAnalysis();
         return true;
       });
     }).catch(function (error) {
@@ -1723,6 +1780,7 @@
   /* ---------------- events ---------------- */
 
   document.addEventListener('click', function (e) {
+    if (e.target.closest('[data-new-scan]')) { resetToEmptyAnalysis(); goTo('overview'); return; }
     var sourceTab = e.target.closest('[data-source-tab]');
     if (sourceTab) { state.sourceTab = sourceTab.getAttribute('data-source-tab'); state.analysisError = ''; renderSourcePanel(); return; }
 
@@ -1859,17 +1917,7 @@
   try { history.scrollRestoration = 'manual'; } catch (e) {}
 
   if (!STATIC_PREVIEW) {
-    state.data = normalise({
-      vulnerabilities: [], remediations: [],
-      visualization: { permission_graph: { nodes: [], links: [], escalation_paths: [] } },
-      risk_brief: null,
-      summary: {
-        source: window.WINNOW_PUBLIC_APP ? 'upload' : 'demo', source_name: 'No scan started',
-        identity_count: 0, policy_count: 0, escalation_paths: 0,
-        coverage: { complete: false, warnings: ['Choose a source and start a scan.'] },
-        ai_status: 'enabled'
-      }
-    });
+    state.data = emptyAnalysisData();
   }
   applyTheme();
   renderAll();
@@ -1886,5 +1934,8 @@
   window.scrollTo(0, 0);
   loadSettings();
   loadOrganization();
-  if (!STATIC_PREVIEW) restoreSavedAnalysis(requestedScanId, false);
+  if (!STATIC_PREVIEW) {
+    loadHistory();
+    if (requestedScanId) restoreSavedAnalysis(requestedScanId, false);
+  }
 })();

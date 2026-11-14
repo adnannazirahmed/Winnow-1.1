@@ -47,7 +47,7 @@
       <span>Risk brief</span>
     </button>
     <div class="brief-content" id="brief-content" aria-live="polite">
-      <div class="brief-loading"><strong>Building risk brief…</strong><span>Summarizing findings, paths, and remediations.</span></div>
+      <div class="brief-loading"><strong>No risk brief yet</strong><span>Run an analysis to create a brief from its evidence.</span></div>
     </div>
   </aside>
 
@@ -59,9 +59,9 @@
       </div>
       <span class="spacer"></span>
       <div class="pill-row">
-        <span class="pill" id="stat-findings">21 findings</span>
-        <span class="pill" id="stat-identities">5 identities</span>
-        <span class="pill" id="stat-techniques">6 techniques</span>
+        <span class="pill" id="stat-findings">0 findings</span>
+        <span class="pill" id="stat-identities">0 identities</span>
+        <span class="pill" id="stat-techniques">0 paths</span>
       </div>
       <button class="btn" id="scan-aws" title="Scan the caller's live AWS account (read-only: GetAccountAuthorizationDetails + GetCallerIdentity)">Scan AWS</button>
       <button class="btn" data-goto="settings">Settings</button>
@@ -110,12 +110,12 @@
             <div class="hero-canvas" id="hero-canvas"></div>
             <div class="hero-copy">
               <div class="eyebrow" style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--n-mute)">Posture</div>
-              <div class="hero-title" id="hero-title">Twelve critical<br>escalation paths</div>
-              <div class="hero-note" id="hero-note">VulnerableAdminPolicy alone reaches administrator through nine distinct actions.</div>
+              <div class="hero-title" id="hero-title">No scan<br>started</div>
+              <div class="hero-note" id="hero-note">Upload or paste an IAM policy to see its findings and paths.</div>
             </div>
             <div class="hero-foot">
-              <span class="pill" id="hero-risk">risk 100/100</span>
-              <span class="pill" id="hero-actions">24 actions · 50h</span>
+              <span class="pill" id="hero-risk">awaiting analysis</span>
+              <span class="pill" id="hero-actions">No scan yet</span>
             </div>
           </div>
           <div class="grid-metrics" id="metrics"></div>
@@ -264,7 +264,7 @@
           </div>
           <div class="rem-col path-side">
             <div class="panel">
-              <div class="panel-head"><span class="panel-title">MITRE ATT&amp;CK coverage</span><span class="panel-meta" id="tech-count">6 techniques</span></div>
+              <div class="panel-head"><span class="panel-title">MITRE ATT&amp;CK coverage</span><span class="panel-meta" id="tech-count">0 techniques</span></div>
               <div class="panel-body" id="heatmap" style="gap:13px"></div>
             </div>
             <div class="panel">
@@ -329,7 +329,7 @@
       <section class="view" data-view="charts">
         <div class="grid-charts">
           <div class="panel chart-card">
-            <div class="head"><span class="panel-title">Severity distribution</span><span class="panel-meta" id="chart-sev-meta">21 findings</span></div>
+            <div class="head"><span class="panel-title">Severity distribution</span><span class="panel-meta" id="chart-sev-meta">0 findings</span></div>
             <div class="chart-holder" id="chart-severity"></div>
           </div>
           <div class="panel chart-card">
@@ -337,7 +337,7 @@
             <div class="chart-holder" id="chart-radar"></div>
           </div>
           <div class="panel chart-card">
-            <div class="head"><span class="panel-title">Actions by priority</span><span class="panel-meta" id="chart-pri-meta">24 actions</span></div>
+            <div class="head"><span class="panel-title">Actions by priority</span><span class="panel-meta" id="chart-pri-meta">0 actions</span></div>
             <div class="chart-holder" id="chart-priority"></div>
           </div>
         </div>
@@ -352,7 +352,7 @@
             <p>Completed analyses are saved locally on this machine. Reopen a previous result without rescanning or sending another AI request.</p>
           </div>
           <div class="history-actions">
-            <button class="btn" type="button" data-goto="overview">New scan</button>
+            <button class="btn" type="button" data-new-scan>New scan</button>
             <button class="btn btn-danger" type="button" id="clear-history">Clear history</button>
           </div>
         </div>

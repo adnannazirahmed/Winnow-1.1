@@ -58,6 +58,8 @@ Use at most three key_risk_ids. If there are no findings, use an empty top_prior
                  remediation_results: List[Dict[str, Any]],
                  visualization: Dict[str, Any], allow_ai=True) -> Dict[str, Any]:
         evidence = self._evidence(summary, findings, remediation_results, visualization)
+        if not findings:
+            return self._unavailable(evidence, 'No findings were detected in this scan.')
         cache_key = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, default=str).encode('utf-8')
         ).hexdigest()

@@ -44,7 +44,7 @@ def build():
                             encoding='utf-8')
     app_page = OUTPUT / 'app' / 'index.html'
     app_html = app_page.read_text(encoding='utf-8')
-    for asset, attribute in (('style.css', 'href'), ('public-app.js', 'src')):
+    for asset, attribute in (('style.css', 'href'), ('public-app.js', 'src'), ('script.js', 'src')):
         original = f'{attribute}="{asset}"'
         if app_html.count(original) != 1:
             raise SystemExit(f'Expected one {asset} reference in the app page')
