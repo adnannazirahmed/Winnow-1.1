@@ -86,13 +86,19 @@ a:hover { color: var(--n-ink); }
   height: 100vh;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.brand {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 0 6px;
+  border: 0; background: none; color: var(--n-ink); font: inherit;
+  text-align: left; cursor: pointer;
+}
+.brand:focus-visible { outline: 2px solid var(--n-acc); outline-offset: 3px; border-radius: 8px; }
 .brand-mark {
   width: 30px; height: 30px; border-radius: 8px;
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
 .brand-mark img { width: 100%; height: 100%; }
+.brand-copy { display: flex; flex-direction: column; }
 .brand-name { font-size: 13px; font-weight: 500; letter-spacing: 0.01em; }
 .brand-sub { font-size: 10px; color: var(--n-mute); letter-spacing: 0.1em; text-transform: uppercase; }
 
