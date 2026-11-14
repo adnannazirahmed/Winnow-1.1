@@ -103,6 +103,20 @@ class TestSettings(unittest.TestCase):
 
 
 class TestCompatibleAIProviders(unittest.TestCase):
+    def test_clean_local_install_has_no_ai_key_or_enabled_provider(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            provider = AIProvider()
+            self.assertFalse(provider.api_key)
+            self.assertFalse(provider.enabled)
+
+    def test_local_provider_uses_only_the_users_configured_key(self):
+        with mock.patch.dict(os.environ, {
+            'AI_PROVIDER': 'openai', 'OPENAI_API_KEY': 'local-user-test-key',
+        }, clear=True):
+            provider = AIProvider()
+            self.assertEqual(provider.api_key, 'local-user-test-key')
+            self.assertEqual(provider.base_url, 'https://api.openai.com/v1')
+
     def test_openai_compatible_chat_request(self):
         with mock.patch.dict(os.environ, {
             'AI_PROVIDER': 'openai', 'OPENAI_API_KEY': 'test-key',

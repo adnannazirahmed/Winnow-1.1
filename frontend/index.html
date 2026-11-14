@@ -401,7 +401,8 @@
               <select class="settings-input" id="ai-provider"><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="ollama">Ollama</option></select>
               <label class="field-label" for="ai-model">Model <span>optional</span></label>
               <input class="settings-input" id="ai-model" type="text" autocomplete="off" spellcheck="false" placeholder="Provider default">
-              <div id="ai-key-row"><label class="field-label" for="ai-api-key" id="ai-key-label">API key</label><input class="settings-input" id="ai-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste API key"></div>
+              <p>Local scans are unlimited, with no daily scan cap. AI is optional and uses your own provider API key and billing, or your own Ollama instance. No project owner API key is included.</p>
+              <div id="ai-key-row"><label class="field-label" for="ai-api-key" id="ai-key-label">API key</label><input class="settings-input" id="ai-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your own API key"></div>
               <div id="ai-base-url-row"><label class="field-label" for="ai-base-url" id="ai-base-url-label">Provider URL</label><input class="settings-input" id="ai-base-url" type="url" autocomplete="off" spellcheck="false"></div>
               <div class="settings-actions"><button class="btn btn-primary" type="submit" id="save-ai-settings">Verify and save</button><button class="btn btn-danger" type="button" id="remove-ai-settings">Remove AI provider</button></div>
             </div>

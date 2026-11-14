@@ -117,6 +117,13 @@ that history to identify new accounts and identities without requiring AI.
 
 ### Installation
 
+Local installations have **unlimited scans with no five-scan daily cap**. AI is
+optional: supply **your own provider API key** in local Settings or `backend/.env`,
+or connect your own Ollama instance. Provider charges and rate limits apply to
+your account. Without an AI provider, the rule and graph engines still work.
+The project owner's API key is not included in the repository or Docker image,
+and local scans do not use the hosted Winnow API.
+
 ```bash
 # Clone the repository
 git clone https://github.com/adnannazirahmed/Winnow-1.1.git
